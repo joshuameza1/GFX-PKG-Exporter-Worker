@@ -1,0 +1,40 @@
+{
+    "template": {
+        "src": "file:///c:/var/elevation/gfx-generator/gfx-worker/ae/TestGFXPKG_Templates.aepx",
+        "composition": "^Test_Animation",
+        "outputModule": "ProRes422",
+        "frameStart": 0,
+        "frameEnd": 24,
+        "frameIncrement": 1,
+        "outputExt": "mov"
+    },
+    "assets": [
+        {
+            "type": "data",
+            "layerName": "^Line One",
+            "property": "Source Text",
+            "value": "test"
+        },
+        {
+            "type": "data",
+            "layerName": "^Line Two",
+            "property": "Source Text",
+            "value": ""
+        },
+        {
+            "type": "data",
+            "layerName": "^Chroma",
+            "property": "Opacity",
+            "value": "0"
+        }
+    ],
+    "actions": {
+        "postrender": [
+            {
+                "module": "@nexrender/action-copy",
+                "input": "result.mov",
+                "output": "c:/var/elevation/gfx-generator/gfx-worker/renders/output.mov"
+            }
+        ]
+    }
+}
