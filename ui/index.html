@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GFX PKG Exporter</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="app">
+    <!-- Sidebar navigation -->
+    <nav id="sidebar">
+      <div class="nav-top">
+        <button class="nav-btn active" data-page="dashboard" title="Dashboard">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+        </button>
+        <button class="nav-btn" data-page="templates" title="Templates">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+        </button>
+        <button class="nav-btn" data-page="log" title="Activity log">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+        </button>
+      </div>
+      <div class="nav-bottom">
+        <button class="nav-btn" data-page="settings" title="Settings">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        </button>
+      </div>
+    </nav>
+
+    <!-- ========== DASHBOARD PAGE ========== -->
+    <div id="page-dashboard" class="page active">
+      <div class="page-content">
+        <!-- Status cards -->
+        <div class="status-grid">
+          <div class="status-card">
+            <div class="status-label">Server</div>
+            <div class="status-row">
+              <span class="dot" id="server-dot"></span>
+              <span class="status-val" id="server-status">Disconnected</span>
+            </div>
+            <div class="status-sub" id="server-url">—</div>
+          </div>
+          <div class="status-card">
+            <div class="status-label">After Effects</div>
+            <div class="status-row">
+              <span class="dot" id="ae-dot"></span>
+              <span class="status-val" id="ae-status">Unknown</span>
+            </div>
+            <div class="status-sub" id="ae-version">—</div>
+          </div>
+          <div class="status-card">
+            <div class="status-label">Template</div>
+            <div class="status-row">
+              <span class="dot blue" id="template-dot"></span>
+              <span class="status-val" id="template-comp-count">—</span>
+            </div>
+            <div class="status-sub" id="template-name">No template</div>
+          </div>
+        </div>
+
+        <!-- Job queue -->
+        <div class="section-hdr">
+          <span class="section-title">Job queue</span>
+          <div style="display:flex; align-items:center; gap:10px;">
+            <button class="text-btn" id="clear-jobs-btn">Clear all</button>
+            <span class="section-count" id="job-count">0 jobs</span>
+          </div>
+        </div>
+        <div class="filter-bar">
+          <button class="filter-btn active" data-filter="all">All</button>
+          <button class="filter-btn" data-filter="rendering"><span class="filter-dot blue"></span>Rendering</button>
+          <button class="filter-btn" data-filter="pending"><span class="filter-dot gray"></span>Queued</button>
+          <button class="filter-btn" data-filter="completed"><span class="filter-dot green"></span>Completed</button>
+          <button class="filter-btn" data-filter="failed"><span class="filter-dot red"></span>Failed</button>
+        </div>
+        <div id="job-list">
+          <div id="queue-empty" class="empty-state">No jobs yet</div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- ========== TEMPLATES PAGE ========== -->
+    <div id="page-templates" class="page">
+      <div class="template-layout">
+        <!-- Template sidebar tree -->
+        <div class="template-sidebar">
+          <div class="template-sidebar-header">
+            <span class="section-title">Packages</span>
+            <button class="icon-btn" id="add-package-btn" title="Add package">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            </button>
+          </div>
+          <div id="package-tree" class="package-tree"></div>
+        </div>
+
+        <!-- Template detail area -->
+        <div class="template-detail" id="template-detail">
+          <div class="empty-state">Select a composition to view details</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ========== ACTIVITY LOG PAGE ========== -->
+    <div id="page-log" class="page">
+      <div class="page-content">
+        <div class="section-hdr">
+          <span class="section-title">Activity log</span>
+          <button class="text-btn" id="clear-log-btn">Clear</button>
+        </div>
+        <div id="full-log" class="log-panel log-panel-full"></div>
+      </div>
+    </div>
+
+    <!-- ========== SETTINGS PAGE ========== -->
+    <div id="page-settings" class="page">
+      <div class="page-content">
+        <!-- Worker identity -->
+        <div class="worker-card">
+          <div class="worker-card-header">
+            <div class="worker-icon">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+            </div>
+            <div class="worker-info">
+              <div class="worker-hostname" id="worker-hostname">—</div>
+              <div class="worker-sub" id="worker-sub">This worker</div>
+            </div>
+            <span class="badge badge-completed" id="worker-online-badge">Online</span>
+          </div>
+          <div class="worker-stats">
+            <div class="worker-stat">
+              <div class="worker-stat-label">After Effects</div>
+              <div class="worker-stat-value" id="worker-ae-info">
+                <span class="dot green" style="width:6px;height:6px;"></span> —
+              </div>
+            </div>
+            <div class="worker-stat">
+              <div class="worker-stat-label">Jobs rendered</div>
+              <div class="worker-stat-value" id="worker-job-stats">—</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Network -->
+        <div class="section-title" style="margin-bottom: 10px; margin-top: 24px;">Network</div>
+        <div class="network-card">
+          <div class="network-header">
+            <div class="network-icon">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+            </div>
+            <div class="network-info">
+              <div class="network-url" id="network-url">—</div>
+              <div class="network-sub" id="network-sub">Server</div>
+            </div>
+            <span class="dot" id="network-dot"></span>
+          </div>
+          <div class="network-workers-label">Workers</div>
+          <div id="network-workers" class="network-workers">
+            <div class="network-worker-row">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+              <div class="network-worker-info">
+                <span class="network-worker-name" id="network-worker-name">—</span>
+                <span class="network-worker-tag">This machine</span>
+              </div>
+              <span class="network-worker-status" id="network-worker-status">—</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Paths -->
+        <div class="section-title" style="margin-bottom: 10px; margin-top: 24px;">Paths</div>
+        <div class="paths-card">
+          <div class="path-row">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+            <span class="path-label">Watch</span>
+            <span class="path-value" id="setting-watch-folder">—</span>
+          </div>
+          <div class="path-row">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+            <span class="path-label">Renders</span>
+            <span class="path-value" id="setting-render-folder">—</span>
+          </div>
+          <div class="path-row last">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+            <span class="path-label">CDN</span>
+            <span class="path-value" id="setting-cdn-url">—</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="renderer.js"></script>
+</body>
+</html>
