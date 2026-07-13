@@ -5,6 +5,14 @@ const { loadEnv } = require('./env-loader');
 loadEnv();
 
 const config = require('../src/config');
+const {
+  loadSettings,
+  saveSettings,
+  needsSetup,
+  isValidServerUrl,
+  applySettingsToConfig,
+  getSettingsPath,
+} = require('./settings-store');
 const { JobStore } = require('../src/queue/job-store');
 const { JobProcessor } = require('../src/queue/job-processor');
 const { SocketClient } = require('../src/bridge/socket-client');
@@ -14,7 +22,13 @@ const { TemplateParser } = require('../src/templates/template-parser');
 const { registerIpcHandlers } = require('./ipc-handlers');
 const { setupAutoUpdater, checkForUpdates } = require('./updater');
 
+const settings = loadSettings();
+applySettingsToConfig(config, settings);
+
 let mainWindow;
+let socketClient;
+let watcher;
+let templateParser;
 
 function sendToRenderer(channel, data) {
   if (mainWindow && !mainWindow.isDestroyed()) {
@@ -28,12 +42,27 @@ function log(message, level = 'info') {
   sendToRenderer('log', entry);
 }
 
-function sendTemplateUpdate(templateParser) {
+function sendTemplateUpdate() {
+  if (!templateParser) return;
   const info = templateParser.getCurrentInfo();
   sendToRenderer('template:updated', {
     ...info,
     graphics: templateParser.lastGraphics,
   });
+}
+
+function restartWatcher() {
+  if (watcher) watcher.stop();
+  watcher = new TemplateWatcher(config.watchFolder);
+  watcher.on('template-changed', async (filePath) => {
+    log('Template file changed, re-parsing...');
+    await templateParser.updatePackage(filePath);
+    const liveGraphics = templateParser.getLiveGraphics();
+    socketClient.emit('updateSlackAppUI', liveGraphics);
+    log(`Pushed ${liveGraphics.length} compositions to Slack`);
+    sendTemplateUpdate();
+  });
+  watcher.start();
 }
 
 app.whenReady().then(() => {
@@ -44,7 +73,7 @@ app.whenReady().then(() => {
     minHeight: 500,
     title: 'GFX PKG Exporter',
     titleBarStyle: 'hiddenInset',
-    trafficLightPosition: { x: 12, y: 18 },
+    trafficLightPosition: { x: 14, y: 14 },
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -54,13 +83,55 @@ app.whenReady().then(() => {
   mainWindow.loadFile(path.join(__dirname, '..', 'ui', 'index.html'));
 
   const jobStore = new JobStore(path.join(app.getPath('userData'), 'jobs.db'));
-  const socketClient = new SocketClient(config.socketIoUrl);
-  const templateParser = new TemplateParser(config.watchFolder);
+  socketClient = new SocketClient(config.socketIoUrl);
+  templateParser = new TemplateParser(config.watchFolder);
   const processor = new JobProcessor(jobStore, config);
   const eventRouter = new EventRouter(socketClient, jobStore, processor);
-  const watcher = new TemplateWatcher(config.watchFolder);
 
-  registerIpcHandlers(ipcMain, { jobStore, socketClient, templateParser, config, processor });
+  registerIpcHandlers(ipcMain, {
+    jobStore,
+    socketClient,
+    templateParser,
+    config,
+    processor,
+    getSettings: () => loadSettings(),
+    saveAppSettings: (partial) => {
+      const prevUrl = config.socketIoUrl;
+      const prevWatch = config.watchFolder;
+      const next = saveSettings(partial);
+      applySettingsToConfig(config, next);
+
+      if (config.socketIoUrl !== prevUrl) {
+        if (isValidServerUrl(config.socketIoUrl)) {
+          log(`Connecting to ${config.socketIoUrl}...`);
+          socketClient.reconnect(config.socketIoUrl);
+        } else {
+          socketClient.disconnect();
+          log('Server URL cleared — disconnected', 'warn');
+        }
+      }
+
+      if (config.watchFolder !== prevWatch) {
+        templateParser.watchFolder = config.watchFolder;
+        restartWatcher();
+        log(`Watch folder updated: ${config.watchFolder || '(none)'}`);
+      }
+
+      sendToRenderer('config:updated', {
+        socketIoUrl: config.socketIoUrl,
+        watchFolder: config.watchFolder,
+        renderFolder: config.renderFolder,
+        cdnUrl: config.cdnUrl,
+        settingsPath: getSettingsPath(),
+        needsSetup: needsSetup(next),
+      });
+
+      return {
+        settings: next,
+        needsSetup: needsSetup(next),
+      };
+    },
+  });
 
   setupAutoUpdater({ log, sendToRenderer });
 
@@ -69,15 +140,6 @@ app.whenReady().then(() => {
       checkForUpdates({ silent: true });
     }, 5000);
   }
-
-  watcher.on('template-changed', async (filePath) => {
-    log('Template file changed, re-parsing...');
-    await templateParser.updatePackage(filePath);
-    const liveGraphics = templateParser.getLiveGraphics();
-    socketClient.emit('updateSlackAppUI', liveGraphics);
-    log(`Pushed ${liveGraphics.length} compositions to Slack`);
-    sendTemplateUpdate(templateParser);
-  });
 
   socketClient.on('status', (status) => {
     sendToRenderer('socket:status', status);
@@ -88,10 +150,12 @@ app.whenReady().then(() => {
           socketClient.emit('updateSlackAppUI', liveGraphics);
           log(`Pushed ${liveGraphics.length} compositions to Slack`);
         }
-        sendTemplateUpdate(templateParser);
+        sendTemplateUpdate();
       });
     } else if (status === 'disconnected') {
       log('Disconnected from server', 'warn');
+    } else if (status === 'connecting') {
+      log('Connecting to server...');
     }
   });
 
@@ -111,8 +175,16 @@ app.whenReady().then(() => {
     sendToRenderer('job:progress', data);
   });
 
-  socketClient.connect();
-  watcher.start();
+  if (isValidServerUrl(config.socketIoUrl) && !needsSetup(settings)) {
+    socketClient.connect();
+  } else {
+    log('Setup required — open Settings or complete first-launch setup', 'warn');
+  }
+
+  if (config.watchFolder) {
+    restartWatcher();
+  }
+
   processor.start();
   log('GFX PKG Exporter started');
 });

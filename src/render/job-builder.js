@@ -28,9 +28,13 @@ function buildNexrenderConfigs(request, config) {
 
   fs.mkdirSync(outputDir, { recursive: true });
 
-  const templatePath = path.join(config.watchFolder, `${request.gfxpkg}.aepx`);
-  if (!fs.existsSync(templatePath)) {
-    throw new Error(`Template not found: ${templatePath}`);
+  const { resolveTemplatePath } = require('../templates/package-paths');
+  const templatePath = resolveTemplatePath(config.watchFolder, request.gfxpkg);
+  if (!templatePath) {
+    throw new Error(
+      `Template not found for "${request.gfxpkg}". ` +
+      `Expected Watch/<name>/<name>.aepx (Collect Files) or Watch/<name>.aepx (legacy).`
+    );
   }
   const templateProject = { path: templatePath };
   const assets = extractTemplateFields(request);

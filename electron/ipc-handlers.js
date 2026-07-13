@@ -10,9 +10,22 @@ const {
   installUpdate,
   isUpdateReady,
 } = require('./updater');
+const {
+  needsSetup,
+  isValidServerUrl,
+  getSettingsPath,
+} = require('./settings-store');
 
 function registerIpcHandlers(ipcMain, services) {
-  const { jobStore, socketClient, templateParser, config, processor } = services;
+  const {
+    jobStore,
+    socketClient,
+    templateParser,
+    config,
+    processor,
+    getSettings,
+    saveAppSettings,
+  } = services;
 
   ipcMain.handle('get-jobs', () => {
     return jobStore.getAll();
@@ -28,6 +41,7 @@ function registerIpcHandlers(ipcMain, services) {
   });
 
   ipcMain.handle('get-config', () => {
+    const settings = getSettings ? getSettings() : {};
     return {
       socketIoUrl: config.socketIoUrl,
       watchFolder: config.watchFolder,
@@ -36,8 +50,23 @@ function registerIpcHandlers(ipcMain, services) {
       hostname: os.hostname(),
       appVersion: app.getVersion(),
       envPath: getEnvPath(),
+      settingsPath: getSettingsPath(),
       isPackaged: app.isPackaged,
+      needsSetup: needsSetup(settings),
+      setupComplete: Boolean(settings.setupComplete),
     };
+  });
+
+  ipcMain.handle('save-settings', (_, partial) => {
+    if (!saveAppSettings) {
+      return { error: 'Settings saving is unavailable' };
+    }
+    if (partial.socketIoUrl !== undefined) {
+      if (partial.socketIoUrl && !isValidServerUrl(partial.socketIoUrl)) {
+        return { error: 'Enter a valid http:// or https:// server URL' };
+      }
+    }
+    return saveAppSettings(partial);
   });
 
   ipcMain.handle('check-for-updates', () => checkForUpdates({ silent: false }));
@@ -134,6 +163,24 @@ function registerIpcHandlers(ipcMain, services) {
   });
 
   ipcMain.handle('pick-aepx-file', async () => {
+    const choice = await dialog.showMessageBox({
+      type: 'question',
+      buttons: ['Package Folder', 'Legacy .aepx', 'Cancel'],
+      defaultId: 0,
+      cancelId: 2,
+      message: 'Add a package',
+      detail: 'Prefer a Collect Files folder so footage/assets stay linked beside the .aepx.',
+    });
+    if (choice.response === 2) return null;
+
+    if (choice.response === 0) {
+      const { canceled, filePaths } = await dialog.showOpenDialog({
+        title: 'Select Collect Files package folder',
+        properties: ['openDirectory'],
+      });
+      return canceled ? null : filePaths[0];
+    }
+
     const { canceled, filePaths } = await dialog.showOpenDialog({
       title: 'Select .aepx package',
       filters: [{ name: 'After Effects Project', extensions: ['aepx'] }],
@@ -142,10 +189,43 @@ function registerIpcHandlers(ipcMain, services) {
     return canceled ? null : filePaths[0];
   });
 
-  ipcMain.handle('load-package', async (_, filePath) => {
-    const dest = path.join(config.watchFolder, path.basename(filePath));
-    fs.copyFileSync(filePath, dest);
-    await templateParser.addPackage(dest); // starts not-live
+  ipcMain.handle('load-package', async (_, selectedPath) => {
+    const {
+      resolveImportSource,
+      copyRecursive,
+      preferMainAepx,
+      findAepxFiles,
+    } = require('../src/templates/package-paths');
+
+    if (!config.watchFolder) {
+      throw new Error('Watch folder is not configured');
+    }
+    fs.mkdirSync(config.watchFolder, { recursive: true });
+
+    const source = resolveImportSource(selectedPath);
+    const dest = path.join(config.watchFolder, source.importName);
+    if (fs.existsSync(dest)) {
+      throw new Error(`A package named "${source.importName}" already exists in the watch folder`);
+    }
+
+    copyRecursive(source.sourcePath, dest);
+
+    const aepxPath = source.kind === 'folder'
+      ? preferMainAepx(dest, findAepxFiles(dest))
+      : dest;
+
+    if (!aepxPath || !fs.existsSync(aepxPath)) {
+      fs.rmSync(dest, { recursive: true, force: true });
+      throw new Error('Imported package is missing an .aepx project');
+    }
+
+    const packageId = source.kind === 'folder' ? source.importName : path.basename(dest);
+    await templateParser.addPackage(aepxPath, {
+      packageId,
+      name: source.kind === 'folder' ? source.importName : path.basename(dest, '.aepx'),
+      kind: source.kind,
+      rootPath: dest,
+    });
     return templateParser.getCurrentInfo();
   });
 
@@ -157,15 +237,16 @@ function registerIpcHandlers(ipcMain, services) {
   });
 
   ipcMain.handle('remove-package', (_, filePath) => {
-    templateParser.removePackage(filePath);
+    const removed = templateParser.removePackage(filePath);
+    const { moveRecursive } = require('../src/templates/package-paths');
 
-    // Move file to _PastBrandings/<YYYY-MM-DD>/ inside the watch folder
-    if (fs.existsSync(filePath)) {
+    const archiveSource = removed?.rootPath || filePath;
+    if (archiveSource && fs.existsSync(archiveSource)) {
       const dateStr = new Date().toISOString().slice(0, 10);
       const archiveDir = path.join(config.watchFolder, '_PastBrandings', dateStr);
       fs.mkdirSync(archiveDir, { recursive: true });
-      const dest = path.join(archiveDir, path.basename(filePath));
-      fs.renameSync(filePath, dest);
+      const dest = path.join(archiveDir, path.basename(archiveSource));
+      moveRecursive(archiveSource, dest);
     }
 
     const liveGraphics = templateParser.getLiveGraphics();
@@ -175,26 +256,36 @@ function registerIpcHandlers(ipcMain, services) {
 
   ipcMain.handle('set-layout', (_, layout) => {
     templateParser.setLayout(layout);
+    const liveGraphics = templateParser.getLiveGraphics();
+    socketClient.emit('updateSlackAppUI', liveGraphics);
     return templateParser.getCurrentInfo();
   });
 
   ipcMain.handle('create-folder', (_, name) => {
     templateParser.createFolder(name);
+    const liveGraphics = templateParser.getLiveGraphics();
+    socketClient.emit('updateSlackAppUI', liveGraphics);
     return templateParser.getCurrentInfo();
   });
 
   ipcMain.handle('rename-folder', (_, { oldName, newName }) => {
     templateParser.renameFolder(oldName, newName);
+    const liveGraphics = templateParser.getLiveGraphics();
+    socketClient.emit('updateSlackAppUI', liveGraphics);
     return templateParser.getCurrentInfo();
   });
 
   ipcMain.handle('delete-folder', (_, name) => {
     templateParser.deleteFolder(name);
+    const liveGraphics = templateParser.getLiveGraphics();
+    socketClient.emit('updateSlackAppUI', liveGraphics);
     return templateParser.getCurrentInfo();
   });
 
   ipcMain.handle('set-package-folder', (_, { filePath, folderName }) => {
     templateParser.setPackageFolder(filePath, folderName || null);
+    const liveGraphics = templateParser.getLiveGraphics();
+    socketClient.emit('updateSlackAppUI', liveGraphics);
     return templateParser.getCurrentInfo();
   });
 

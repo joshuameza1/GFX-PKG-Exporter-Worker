@@ -49,10 +49,13 @@ document.getElementById('clear-log-btn')?.addEventListener('click', () => {
 
 // ===== Add package =====
 document.getElementById('add-package-btn')?.addEventListener('click', async () => {
-  const filePath = await window.api.pickAepxFile();
-  if (filePath) {
+  try {
+    const filePath = await window.api.pickAepxFile();
+    if (!filePath) return;
     const info = await window.api.loadPackage(filePath);
     if (info) renderPackageTree(info);
+  } catch (err) {
+    alert(err.message || 'Failed to add package');
   }
 });
 
@@ -261,14 +264,28 @@ function addLog(entry) {
 
 // ===== Template tree =====
 
+function packageLayoutId(pkg) {
+  return pkg.packageId || pkg.name || (pkg.filePath || '').split('/').pop();
+}
+
 function buildLayoutFromInfo(info) {
+  if (info && info.layout) {
+    return {
+      folders: (info.layout.folders || []).map((f) => ({
+        name: f.name,
+        packages: [...(f.packages || [])],
+      })),
+      ungrouped: [...(info.layout.ungrouped || [])],
+    };
+  }
+
   const { packages, folders } = info;
   return {
     folders: (folders || []).map((name) => ({
       name,
-      packages: packages.filter((p) => p.folder === name).map((p) => p.filePath.split('/').pop()),
+      packages: packages.filter((p) => p.folder === name).map(packageLayoutId),
     })),
-    ungrouped: packages.filter((p) => !p.folder).map((p) => p.filePath.split('/').pop()),
+    ungrouped: packages.filter((p) => !p.folder).map(packageLayoutId),
   };
 }
 
@@ -305,14 +322,15 @@ function renderPackageTree(templateInfo) {
     const liveBtn = pkg.isLive
       ? `<span class="pkg-live-badge" data-file-path="${escapeHtml(pkg.filePath)}" data-live="true">Live</span>`
       : `<button class="pkg-make-live-btn" data-file-path="${escapeHtml(pkg.filePath)}" data-live="false">Make live</button>`;
+    const kindLabel = pkg.kind === 'folder' ? 'folder' : 'file';
     return `
-      <div class="pkg-row" draggable="true" data-drag-type="package" data-file-path="${escapeHtml(pkg.filePath)}" data-folder="${escapeHtml(pkg.folder || '')}" data-pkg="${idx}">
+      <div class="pkg-row" draggable="true" data-drag-type="package" data-package-id="${escapeHtml(packageLayoutId(pkg))}" data-file-path="${escapeHtml(pkg.filePath)}" data-folder="${escapeHtml(pkg.folder || '')}" data-pkg="${idx}" title="${escapeHtml(kindLabel)} package">
         <div class="pkg-header">
           <span class="drag-handle" title="Drag to reorder">⠿</span>
           <svg class="pkg-chevron expanded" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
           <span class="pkg-name">${escapeHtml(pkg.name)}</span>
           ${liveBtn}
-          <button class="pkg-delete-btn" data-file-path="${escapeHtml(pkg.filePath)}" title="Archive package">×</button>
+          <button class="pkg-delete-btn" data-file-path="${escapeHtml(pkg.filePath)}" data-package-name="${escapeHtml(pkg.name)}" title="Archive package">×</button>
         </div>
         <div class="comp-list" data-pkg="${idx}">${compsHtml}</div>
       </div>`;
@@ -378,8 +396,8 @@ function renderPackageTree(templateInfo) {
   tree.querySelectorAll('.pkg-delete-btn').forEach((btn) => {
     btn.addEventListener('click', async (e) => {
       e.stopPropagation();
-      const name = btn.dataset.filePath.split('/').pop().replace('.aepx', '');
-      if (!confirm(`Archive "${name}"?\n\nThe file will be moved to _PastBrandings in your watch folder.`)) return;
+      const name = btn.dataset.packageName || btn.dataset.filePath.split('/').pop().replace(/\.aepx$/i, '');
+      if (!confirm(`Archive "${name}"?\n\nThe package will be moved to _PastBrandings in your watch folder.`)) return;
       const updated = await window.api.removePackage(btn.dataset.filePath);
       if (updated) renderPackageTree(updated);
     });
@@ -421,7 +439,7 @@ function renderPackageTree(templateInfo) {
 }
 
 function wireDragAndDrop(tree, templateInfo) {
-  let dragging = null; // { type:'package'|'folder', id:filePath|folderName }
+  let dragging = null; // { type:'package'|'folder', id:packageId|folderName }
 
   function clearHighlights() {
     tree.querySelectorAll('.drop-before, .drop-after, .drop-into, .dragging').forEach((el) => {
@@ -429,10 +447,14 @@ function wireDragAndDrop(tree, templateInfo) {
     });
   }
 
+  function rowPackageId(el) {
+    return el?.dataset.packageId || el?.dataset.filePath;
+  }
+
   tree.querySelectorAll('[data-drag-type]').forEach((el) => {
     el.addEventListener('dragstart', (e) => {
       const type = el.dataset.dragType;
-      const id = type === 'package' ? el.dataset.filePath : el.dataset.folderName;
+      const id = type === 'package' ? rowPackageId(el) : el.dataset.folderName;
       dragging = { type, id };
       e.dataTransfer.effectAllowed = 'move';
       e.dataTransfer.setData('text/plain', id);
@@ -446,12 +468,12 @@ function wireDragAndDrop(tree, templateInfo) {
     if (!dragging) return;
     clearHighlights();
 
-    const pkgRow   = e.target.closest('.pkg-row');
+    const pkgRow = e.target.closest('.pkg-row');
     const folderRow = e.target.closest('.folder-row');
     const dropSection = e.target.closest('[data-drop-folder]');
 
     if (dragging.type === 'package') {
-      if (pkgRow && pkgRow.dataset.filePath !== dragging.id) {
+      if (pkgRow && rowPackageId(pkgRow) !== dragging.id) {
         const mid = pkgRow.getBoundingClientRect().top + pkgRow.getBoundingClientRect().height / 2;
         pkgRow.classList.add(e.clientY < mid ? 'drop-before' : 'drop-after');
       } else if (folderRow && !pkgRow) {
@@ -475,54 +497,63 @@ function wireDragAndDrop(tree, templateInfo) {
     e.preventDefault();
     if (!dragging) return;
     const layout = buildLayoutFromInfo(templateInfo);
-    const pkgRow    = e.target.closest('.pkg-row');
-    const folderRow  = e.target.closest('.folder-row');
+    const pkgRow = e.target.closest('.pkg-row');
+    const folderRow = e.target.closest('.folder-row');
     const dropSection = e.target.closest('[data-drop-folder]');
-    const dragBase   = dragging.id.split('/').pop();
+    const dragId = dragging.id;
 
     if (dragging.type === 'package') {
-      // Remove from current location
-      layout.ungrouped = layout.ungrouped.filter((b) => b !== dragBase);
-      for (const f of layout.folders) f.packages = f.packages.filter((b) => b !== dragBase);
+      layout.ungrouped = layout.ungrouped.filter((id) => id !== dragId);
+      for (const f of layout.folders) f.packages = f.packages.filter((id) => id !== dragId);
 
-      if (pkgRow && pkgRow.dataset.filePath !== dragging.id) {
-        const targetBase   = pkgRow.dataset.filePath.split('/').pop();
+      if (pkgRow && rowPackageId(pkgRow) !== dragId) {
+        const targetId = rowPackageId(pkgRow);
         const targetFolder = pkgRow.dataset.folder;
         const rect = pkgRow.getBoundingClientRect();
         const before = e.clientY < rect.top + rect.height / 2;
         if (targetFolder) {
-          const f = layout.folders.find((f) => f.name === targetFolder);
-          if (f) { const i = f.packages.indexOf(targetBase); f.packages.splice(before ? i : i + 1, 0, dragBase); }
+          const f = layout.folders.find((folder) => folder.name === targetFolder);
+          if (f) {
+            const i = Math.max(0, f.packages.indexOf(targetId));
+            f.packages.splice(before ? i : i + 1, 0, dragId);
+          }
         } else {
-          const i = layout.ungrouped.indexOf(targetBase);
-          layout.ungrouped.splice(before ? i : i + 1, 0, dragBase);
+          const i = Math.max(0, layout.ungrouped.indexOf(targetId));
+          layout.ungrouped.splice(before ? i : i + 1, 0, dragId);
         }
       } else if (folderRow && !pkgRow) {
-        const f = layout.folders.find((f) => f.name === folderRow.dataset.folderName);
-        if (f) f.packages.push(dragBase);
+        const f = layout.folders.find((folder) => folder.name === folderRow.dataset.folderName);
+        if (f) f.packages.push(dragId);
       } else if (dropSection && !pkgRow && !folderRow) {
         const targetFolder = dropSection.dataset.dropFolder;
         if (targetFolder) {
-          const f = layout.folders.find((f) => f.name === targetFolder);
-          if (f) f.packages.push(dragBase);
+          const f = layout.folders.find((folder) => folder.name === targetFolder);
+          if (f) f.packages.push(dragId);
         } else {
-          layout.ungrouped.push(dragBase);
+          layout.ungrouped.push(dragId);
         }
-      } else { clearHighlights(); dragging = null; return; }
-
+      } else {
+        clearHighlights();
+        dragging = null;
+        return;
+      }
     } else if (dragging.type === 'folder') {
       if (folderRow && folderRow.dataset.folderName !== dragging.id && !pkgRow) {
         const dragFolder = layout.folders.find((f) => f.name === dragging.id);
         if (dragFolder) {
           layout.folders = layout.folders.filter((f) => f.name !== dragging.id);
           const i = layout.folders.findIndex((f) => f.name === folderRow.dataset.folderName);
-          const rect = folderRow.getBoundingClientRect();
-          layout.folders.splice(e.clientY < rect.top + rect.height / 2 ? i : i + 1, 0, dragFolder);
+          layout.folders.splice(e.clientY < folderRow.getBoundingClientRect().top + folderRow.getBoundingClientRect().height / 2 ? i : i + 1, 0, dragFolder);
         }
-      } else { clearHighlights(); dragging = null; return; }
+      } else {
+        clearHighlights();
+        dragging = null;
+        return;
+      }
     }
 
-    clearHighlights(); dragging = null;
+    clearHighlights();
+    dragging = null;
     const updated = await window.api.setLayout(layout);
     if (updated) renderPackageTree(updated);
   });
@@ -891,21 +922,9 @@ async function init() {
 
   const config = await window.api.getConfig();
   if (config) {
-    document.getElementById('server-url').textContent = config.socketIoUrl || '—';
-    document.getElementById('setting-watch-folder').textContent = config.watchFolder || '—';
-    document.getElementById('setting-render-folder').textContent = config.renderFolder || '—';
-    document.getElementById('setting-cdn-url').textContent = config.cdnUrl || '—';
-    document.getElementById('setting-env-path').textContent = config.envPath || '—';
-    document.getElementById('app-version').textContent = config.appVersion ? `v${config.appVersion}` : '—';
-    if (!config.isPackaged) {
-      setUpdateUi({ status: 'dev-mode' });
-    }
-    document.getElementById('network-url').textContent = config.socketIoUrl || '—';
-    if (config.hostname) {
-      const workerHostname = document.getElementById('worker-hostname');
-      if (workerHostname) workerHostname.textContent = config.hostname;
-      const networkWorkerName = document.getElementById('network-worker-name');
-      if (networkWorkerName) networkWorkerName.textContent = config.hostname;
+    applyConfigToUi(config);
+    if (config.needsSetup) {
+      showSetupOverlay(config.socketIoUrl || '');
     }
   }
 
@@ -928,6 +947,128 @@ async function init() {
   }
 
 }
+
+function applyConfigToUi(config) {
+  const serverUrlEl = document.getElementById('server-url');
+  if (serverUrlEl) serverUrlEl.textContent = config.socketIoUrl || '—';
+
+  const settingServer = document.getElementById('setting-server-url');
+  if (settingServer && document.activeElement !== settingServer) {
+    settingServer.value = config.socketIoUrl || '';
+  }
+
+  const watch = document.getElementById('setting-watch-folder');
+  if (watch && document.activeElement !== watch) watch.value = config.watchFolder || '';
+
+  const renders = document.getElementById('setting-render-folder');
+  if (renders && document.activeElement !== renders) renders.value = config.renderFolder || '';
+
+  const cdn = document.getElementById('setting-cdn-url');
+  if (cdn && document.activeElement !== cdn) cdn.value = config.cdnUrl || '';
+
+  const envPath = document.getElementById('setting-env-path');
+  if (envPath) envPath.textContent = config.settingsPath || config.envPath || '—';
+
+  const networkUrl = document.getElementById('network-url');
+  if (networkUrl) networkUrl.textContent = config.socketIoUrl || '';
+
+  document.getElementById('app-version').textContent = config.appVersion ? `v${config.appVersion}` : '—';
+  if (!config.isPackaged) {
+    setUpdateUi({ status: 'dev-mode' });
+  }
+  if (config.hostname) {
+    const workerHostname = document.getElementById('worker-hostname');
+    if (workerHostname) workerHostname.textContent = config.hostname;
+  }
+}
+
+function setSaveStatus(id, message, kind = '') {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.textContent = message;
+  el.className = `settings-save-status${kind ? ` ${kind}` : ''}`;
+}
+
+function showSetupOverlay(prefill = '') {
+  const overlay = document.getElementById('setup-overlay');
+  const input = document.getElementById('setup-server-url');
+  const error = document.getElementById('setup-error');
+  if (!overlay || !input) return;
+  input.value = prefill && !prefill.includes('localhost') ? prefill : '';
+  if (error) error.textContent = '';
+  overlay.hidden = false;
+}
+
+function hideSetupOverlay() {
+  const overlay = document.getElementById('setup-overlay');
+  if (overlay) overlay.hidden = true;
+}
+
+document.getElementById('setup-continue-btn')?.addEventListener('click', async () => {
+  const input = document.getElementById('setup-server-url');
+  const error = document.getElementById('setup-error');
+  const btn = document.getElementById('setup-continue-btn');
+  const url = (input?.value || '').trim();
+  if (!url) {
+    if (error) error.textContent = 'Server URL is required.';
+    return;
+  }
+  btn.disabled = true;
+  const result = await window.api.saveSettings({ socketIoUrl: url });
+  btn.disabled = false;
+  if (result?.error) {
+    if (error) error.textContent = result.error;
+    return;
+  }
+  hideSetupOverlay();
+  applyConfigToUi({
+    ...(await window.api.getConfig()),
+    socketIoUrl: result.settings.socketIoUrl,
+  });
+});
+
+document.getElementById('setup-server-url')?.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') document.getElementById('setup-continue-btn')?.click();
+});
+
+document.getElementById('save-server-url-btn')?.addEventListener('click', async () => {
+  const input = document.getElementById('setting-server-url');
+  const btn = document.getElementById('save-server-url-btn');
+  btn.disabled = true;
+  setSaveStatus('server-url-save-status', 'Saving...');
+  const result = await window.api.saveSettings({ socketIoUrl: (input?.value || '').trim() });
+  btn.disabled = false;
+  if (result?.error) {
+    setSaveStatus('server-url-save-status', result.error, 'err');
+    return;
+  }
+  setSaveStatus('server-url-save-status', 'Saved — reconnecting…', 'ok');
+  applyConfigToUi(await window.api.getConfig());
+});
+
+document.getElementById('save-paths-btn')?.addEventListener('click', async () => {
+  const btn = document.getElementById('save-paths-btn');
+  btn.disabled = true;
+  setSaveStatus('paths-save-status', 'Saving...');
+  const result = await window.api.saveSettings({
+    watchFolder: document.getElementById('setting-watch-folder')?.value.trim() || '',
+    renderFolder: document.getElementById('setting-render-folder')?.value.trim() || '',
+    cdnUrl: document.getElementById('setting-cdn-url')?.value.trim() || '',
+  });
+  btn.disabled = false;
+  if (result?.error) {
+    setSaveStatus('paths-save-status', result.error, 'err');
+    return;
+  }
+  setSaveStatus('paths-save-status', 'Saved', 'ok');
+  applyConfigToUi(await window.api.getConfig());
+});
+
+window.api.onConfigUpdated?.((config) => {
+  applyConfigToUi(config);
+  if (config.needsSetup) showSetupOverlay(config.socketIoUrl || '');
+  else hideSetupOverlay();
+});
 
 // ===== File action delegation =====
 document.addEventListener('click', async (e) => {

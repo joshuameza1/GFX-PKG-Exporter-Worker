@@ -1,6 +1,11 @@
 const fs = require('fs');
 const path = require('path');
 const aepx = require('aepx');
+const {
+  discoverPackages,
+  packageIdFromAepxPath,
+  resolveTemplatePath,
+} = require('./package-paths');
 
 function parseProjectToJSON(filePath) {
   try {
@@ -30,6 +35,7 @@ function extractGraphics(project) {
 
   const comps = findTemplateComps(items);
   const graphics = [];
+  const gfxpkg = project.gfxpkg || project.name.replace(/\.aepx$/i, '');
 
   for (const comp of comps) {
     const name = comp.string.replace('^', '').split('_').join(' ');
@@ -39,7 +45,7 @@ function extractGraphics(project) {
       ),
     };
 
-    const pkgToken = project.name.replace('.aepx', '').replace(/\s+/g, '').replace(/[^a-zA-Z0-9]/g, '_');
+    const pkgToken = gfxpkg.replace(/\s+/g, '').replace(/[^a-zA-Z0-9]/g, '_');
     const button = {
       name,
       action_id: `Create_${pkgToken}_${name.split(' ').join('_')}`,
@@ -89,7 +95,11 @@ function extractGraphics(project) {
     compSettings.final_frames = finalFrames;
 
     graphics.push({
-      gfxpkg: project.name.replace('.aepx', ''),
+      gfxpkg,
+      packageId: project.packageId || gfxpkg,
+      aepxPath: project.path,
+      rootPath: project.rootPath || path.dirname(project.path),
+      kind: project.kind || 'file',
       comp_settings: compSettings,
       button,
       text_inputs: textInputs,
@@ -105,13 +115,12 @@ const LAYOUT_FILE = '.gfx-layout.json';
 class TemplateParser {
   constructor(watchFolder) {
     this.watchFolder = watchFolder;
-    // filePath → { name, graphics, isLive }
+    // packageId → { name, graphics, isLive, aepxPath, rootPath, kind }
     this.packages = new Map();
-    // { folders: [{name, packages:[basename]}], ungrouped:[basename] }
+    // { folders: [{name, packages:[packageId]}], ungrouped:[packageId] }
     this.layout = { folders: [], ungrouped: [] };
   }
 
-  // ── Layout persistence ────────────────────────────────────────────
   _layoutPath() {
     return path.join(this.watchFolder, LAYOUT_FILE);
   }
@@ -119,8 +128,11 @@ class TemplateParser {
   _loadLayout() {
     try {
       const raw = fs.readFileSync(this._layoutPath(), 'utf8');
-      const p = JSON.parse(raw);
-      this.layout = { folders: p.folders || [], ungrouped: p.ungrouped || [] };
+      const parsed = JSON.parse(raw);
+      this.layout = {
+        folders: parsed.folders || [],
+        ungrouped: parsed.ungrouped || [],
+      };
     } catch {
       this.layout = { folders: [], ungrouped: [] };
     }
@@ -135,86 +147,125 @@ class TemplateParser {
     }
   }
 
-  _addToLayoutIfMissing(basename) {
-    const inFolder = this.layout.folders.some((f) => f.packages.includes(basename));
-    if (!inFolder && !this.layout.ungrouped.includes(basename)) {
-      this.layout.ungrouped.push(basename);
+  _normalizeLayoutIds(discovered) {
+    const byName = new Map();
+    for (const pkg of discovered) {
+      byName.set(pkg.name, pkg.id);
+      byName.set(pkg.id, pkg.id);
+      byName.set(`${pkg.name}.aepx`, pkg.id);
+    }
+
+    const remap = (id) => byName.get(id) || byName.get(id.replace(/\.aepx$/i, '')) || id;
+
+    this.layout.ungrouped = this.layout.ungrouped.map(remap);
+    for (const folder of this.layout.folders) {
+      folder.packages = (folder.packages || []).map(remap);
     }
   }
 
-  _removeFromLayout(basename) {
-    this.layout.ungrouped = this.layout.ungrouped.filter((b) => b !== basename);
-    for (const f of this.layout.folders) {
-      f.packages = f.packages.filter((b) => b !== basename);
+  _addToLayoutIfMissing(packageId) {
+    const inFolder = this.layout.folders.some((f) => f.packages.includes(packageId));
+    if (!inFolder && !this.layout.ungrouped.includes(packageId)) {
+      this.layout.ungrouped.push(packageId);
+    }
+  }
+
+  _removeFromLayout(packageId) {
+    this.layout.ungrouped = this.layout.ungrouped.filter((id) => id !== packageId);
+    for (const folder of this.layout.folders) {
+      folder.packages = folder.packages.filter((id) => id !== packageId);
     }
   }
 
   _pruneLayout() {
-    const loaded = new Set(Array.from(this.packages.keys()).map((fp) => path.basename(fp)));
-    this.layout.ungrouped = this.layout.ungrouped.filter((b) => loaded.has(b));
-    for (const f of this.layout.folders) {
-      f.packages = f.packages.filter((b) => loaded.has(b));
+    const loaded = new Set(this.packages.keys());
+    this.layout.ungrouped = this.layout.ungrouped.filter((id) => loaded.has(id));
+    for (const folder of this.layout.folders) {
+      folder.packages = folder.packages.filter((id) => loaded.has(id));
     }
   }
 
-  // ── Core parsing ──────────────────────────────────────────────────
   async parseAllTemplates() {
     if (!this.watchFolder || !fs.existsSync(this.watchFolder)) return [];
     this._loadLayout();
-    const files = fs.readdirSync(this.watchFolder).filter(
-      (f) => f.endsWith('.aepx') && !f.startsWith('.') && !f.startsWith('~')
-    );
-    for (const fileName of files) {
-      const filePath = path.join(this.watchFolder, fileName);
-      await this._parseFile(filePath, true);
-      this._addToLayoutIfMissing(fileName);
+    this.packages.clear();
+
+    const discovered = discoverPackages(this.watchFolder);
+    this._normalizeLayoutIds(discovered);
+
+    for (const pkg of discovered) {
+      await this._parsePackage(pkg, true);
+      this._addToLayoutIfMissing(pkg.id);
     }
+
     this._pruneLayout();
     this._saveLayout();
     return this.getLiveGraphics();
   }
 
-  async addPackage(filePath) {
-    await this._parseFile(filePath, false);
-    this._addToLayoutIfMissing(path.basename(filePath));
+  async addPackage(aepxPath, meta = {}) {
+    const discovered = discoverPackages(this.watchFolder);
+    const packageId = meta.packageId
+      || packageIdFromAepxPath(this.watchFolder, aepxPath)
+      || path.basename(aepxPath);
+    const match = discovered.find((p) => p.id === packageId || p.aepxPath === aepxPath);
+
+    await this._parsePackage(match || {
+      id: packageId,
+      name: meta.name || packageId.replace(/\.aepx$/i, ''),
+      kind: meta.kind || (packageId.toLowerCase().endsWith('.aepx') ? 'file' : 'folder'),
+      rootPath: meta.rootPath || (match ? match.rootPath : path.dirname(aepxPath)),
+      aepxPath,
+    }, false);
+
+    this._addToLayoutIfMissing(packageId);
     this._saveLayout();
   }
 
-  async updatePackage(filePath) {
-    const existing = this.packages.get(filePath);
+  async updatePackage(aepxPath) {
+    const packageId = packageIdFromAepxPath(this.watchFolder, aepxPath);
+    if (!packageId) return;
+
+    const existing = this.packages.get(packageId);
     const wasLive = existing ? existing.isLive : true;
-    await this._parseFile(filePath, wasLive);
+    const discovered = discoverPackages(this.watchFolder);
+    const match = discovered.find((p) => p.id === packageId);
+    if (!match) return;
+    await this._parsePackage(match, wasLive);
   }
 
-  // ── Package operations ────────────────────────────────────────────
-  setLive(filePath, isLive) {
-    const pkg = this.packages.get(filePath);
+  setLive(filePathOrId, isLive) {
+    const pkg = this._getPackage(filePathOrId);
     if (pkg) pkg.isLive = isLive;
   }
 
-  removePackage(filePath) {
-    this.packages.delete(filePath);
-    this._removeFromLayout(path.basename(filePath));
+  removePackage(filePathOrId) {
+    const packageId = this._resolvePackageId(filePathOrId);
+    if (!packageId) return null;
+    const pkg = this.packages.get(packageId);
+    this.packages.delete(packageId);
+    this._removeFromLayout(packageId);
     this._saveLayout();
+    return pkg || null;
   }
 
-  setPackageFolder(filePath, folderName) {
-    const basename = path.basename(filePath);
-    this._removeFromLayout(basename);
+  setPackageFolder(filePathOrId, folderName) {
+    const packageId = this._resolvePackageId(filePathOrId);
+    if (!packageId) return;
+    this._removeFromLayout(packageId);
     if (folderName) {
       let folder = this.layout.folders.find((f) => f.name === folderName);
       if (!folder) {
         folder = { name: folderName, packages: [] };
         this.layout.folders.push(folder);
       }
-      folder.packages.push(basename);
+      folder.packages.push(packageId);
     } else {
-      this.layout.ungrouped.push(basename);
+      this.layout.ungrouped.push(packageId);
     }
     this._saveLayout();
   }
 
-  // ── Layout operations ─────────────────────────────────────────────
   setLayout(newLayout) {
     this.layout = {
       folders: (newLayout.folders || []).map((f) => ({
@@ -250,10 +301,9 @@ class TemplateParser {
     }
   }
 
-  // ── Data access ───────────────────────────────────────────────────
   getLiveGraphics() {
     const all = [];
-    for (const pkg of this.packages.values()) {
+    for (const pkg of this.getAllPackages()) {
       if (pkg.isLive) all.push(...pkg.graphics);
     }
     return all;
@@ -261,31 +311,36 @@ class TemplateParser {
 
   getAllPackages() {
     const result = [];
-    const addPkg = (basename, folderName) => {
-      const filePath = path.join(this.watchFolder, basename);
-      const pkg = this.packages.get(filePath);
-      if (pkg) {
-        result.push({
-          filePath,
-          name: pkg.name.replace('.aepx', ''),
-          graphics: pkg.graphics,
-          isLive: pkg.isLive,
-          compositionCount: pkg.graphics.length,
-          folder: folderName || null,
-        });
-      }
+    const addPkg = (packageId, folderName) => {
+      const pkg = this.packages.get(packageId);
+      if (!pkg) return;
+      result.push({
+        packageId,
+        filePath: pkg.aepxPath,
+        rootPath: pkg.rootPath,
+        kind: pkg.kind,
+        name: pkg.name,
+        graphics: pkg.graphics,
+        isLive: pkg.isLive,
+        compositionCount: pkg.graphics.length,
+        folder: folderName || null,
+      });
     };
-    for (const f of this.layout.folders) {
-      for (const b of f.packages) addPkg(b, f.name);
+
+    for (const folder of this.layout.folders) {
+      for (const packageId of folder.packages) addPkg(packageId, folder.name);
     }
-    for (const b of this.layout.ungrouped) addPkg(b, null);
-    // Safety net: anything not yet in layout
-    const inResult = new Set(result.map((p) => p.filePath));
-    for (const [filePath, pkg] of this.packages.entries()) {
-      if (!inResult.has(filePath)) {
+    for (const packageId of this.layout.ungrouped) addPkg(packageId, null);
+
+    const inResult = new Set(result.map((p) => p.packageId));
+    for (const [packageId, pkg] of this.packages.entries()) {
+      if (!inResult.has(packageId)) {
         result.push({
-          filePath,
-          name: pkg.name.replace('.aepx', ''),
+          packageId,
+          filePath: pkg.aepxPath,
+          rootPath: pkg.rootPath,
+          kind: pkg.kind,
+          name: pkg.name,
           graphics: pkg.graphics,
           isLive: pkg.isLive,
           compositionCount: pkg.graphics.length,
@@ -302,6 +357,7 @@ class TemplateParser {
     return {
       packages,
       folders: this.layout.folders.map((f) => f.name),
+      layout: this.layout,
       graphics: liveGraphics,
       compositionCount: liveGraphics.length,
       template: packages.length > 0 ? { name: packages[0].name } : null,
@@ -312,12 +368,46 @@ class TemplateParser {
     return this.getLiveGraphics();
   }
 
-  async _parseFile(filePath, isLive) {
-    const project = { name: path.basename(filePath), path: filePath };
-    const graphics = extractGraphics(project);
-    if (graphics) {
-      this.packages.set(filePath, { name: project.name, graphics, isLive });
+  findTemplatePath(gfxpkg) {
+    return resolveTemplatePath(this.watchFolder, gfxpkg);
+  }
+
+  _resolvePackageId(filePathOrId) {
+    if (!filePathOrId) return null;
+    if (this.packages.has(filePathOrId)) return filePathOrId;
+    const fromPath = packageIdFromAepxPath(this.watchFolder, filePathOrId);
+    if (fromPath && this.packages.has(fromPath)) return fromPath;
+    for (const [id, pkg] of this.packages.entries()) {
+      if (pkg.aepxPath === filePathOrId || pkg.rootPath === filePathOrId) return id;
     }
+    return filePathOrId;
+  }
+
+  _getPackage(filePathOrId) {
+    const id = this._resolvePackageId(filePathOrId);
+    return id ? this.packages.get(id) : null;
+  }
+
+  async _parsePackage(pkgMeta, isLive) {
+    const project = {
+      name: path.basename(pkgMeta.aepxPath),
+      path: pkgMeta.aepxPath,
+      gfxpkg: pkgMeta.name,
+      packageId: pkgMeta.id,
+      rootPath: pkgMeta.rootPath,
+      kind: pkgMeta.kind,
+    };
+    const graphics = extractGraphics(project);
+    if (!graphics) return null;
+
+    this.packages.set(pkgMeta.id, {
+      name: pkgMeta.name,
+      graphics,
+      isLive,
+      aepxPath: pkgMeta.aepxPath,
+      rootPath: pkgMeta.rootPath,
+      kind: pkgMeta.kind,
+    });
     return graphics;
   }
 }

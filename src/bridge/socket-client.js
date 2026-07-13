@@ -10,7 +10,29 @@ class SocketClient extends EventEmitter {
     this._pendingListeners = [];
   }
 
+  disconnect() {
+    if (this.socket) {
+      this.socket.removeAllListeners();
+      this.socket.disconnect();
+      this.socket = null;
+    }
+    this._setStatus('disconnected');
+  }
+
+  reconnect(url) {
+    if (url) this.url = url;
+    this.disconnect();
+    if (!this.url) return;
+    this.connect();
+  }
+
   connect() {
+    if (!this.url) {
+      this._setStatus('disconnected');
+      return;
+    }
+
+    this._setStatus('connecting');
     this.socket = io(this.url, {
       reconnection: true,
       reconnectionDelay: 2000,
@@ -60,6 +82,10 @@ class SocketClient extends EventEmitter {
 
   getStatus() {
     return this.status;
+  }
+
+  getUrl() {
+    return this.url;
   }
 
   _setStatus(status) {

@@ -5,6 +5,7 @@ contextBridge.exposeInMainWorld('api', {
   getSocketStatus: () => ipcRenderer.invoke('get-socket-status'),
   getTemplateInfo: () => ipcRenderer.invoke('get-template-info'),
   getConfig: () => ipcRenderer.invoke('get-config'),
+  saveSettings: (partial) => ipcRenderer.invoke('save-settings', partial),
   testRender: (data) => ipcRenderer.invoke('test-render', data),
   getAeStatus: () => ipcRenderer.invoke('get-ae-status'),
   clearJobs: () => ipcRenderer.invoke('clear-jobs'),
@@ -46,6 +47,10 @@ contextBridge.exposeInMainWorld('api', {
   onUpdateStatus: (cb) => {
     ipcRenderer.on('update:status', (_, status) => cb(status));
     return () => ipcRenderer.removeAllListeners('update:status');
+  },
+  onConfigUpdated: (cb) => {
+    ipcRenderer.on('config:updated', (_, config) => cb(config));
+    return () => ipcRenderer.removeAllListeners('config:updated');
   },
   checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),
   downloadUpdate: () => ipcRenderer.invoke('download-update'),

@@ -1,6 +1,6 @@
 {
   "name": "gfx-pkg-exporter",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "GFX PKG Exporter - After Effects render worker with Electron UI",
   "main": "electron/main.js",
   "author": "Elevation Church",

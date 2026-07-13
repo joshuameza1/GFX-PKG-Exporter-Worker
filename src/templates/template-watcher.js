@@ -1,6 +1,7 @@
 const EventEmitter = require('events');
 const chokidar = require('chokidar');
 const path = require('path');
+const { packageIdFromAepxPath, isIgnoredName } = require('./package-paths');
 
 class TemplateWatcher extends EventEmitter {
   constructor(watchFolder) {
@@ -22,33 +23,38 @@ class TemplateWatcher extends EventEmitter {
       usePolling: true,
       alwaysStat: true,
       ignoreInitial: true,
+      depth: 6,
     });
 
-    this.watcher.on('change', (filePath) => {
-      if (!this._isValidTemplate(filePath)) return;
+    this.watcher.on('change', (filePath) => this._handle(filePath, 'changed'));
+    this.watcher.on('add', (filePath) => this._handle(filePath, 'added'));
+  }
 
-      // Debounce rapid saves (AE can trigger multiple change events)
-      clearTimeout(this.debounceTimer);
-      this.debounceTimer = setTimeout(() => {
-        console.log(`[watcher] Template changed: ${path.basename(filePath)}`);
-        this.emit('template-changed', filePath);
-      }, 1000);
-    });
+  _handle(filePath, action) {
+    if (!this._isValidTemplate(filePath)) return;
 
-    this.watcher.on('add', (filePath) => {
-      if (!this._isValidTemplate(filePath)) return;
-      console.log(`[watcher] Template added: ${path.basename(filePath)}`);
+    clearTimeout(this.debounceTimer);
+    this.debounceTimer = setTimeout(() => {
+      const packageId = packageIdFromAepxPath(this.watchFolder, filePath);
+      console.log(`[watcher] Template ${action}: ${packageId || path.basename(filePath)}`);
       this.emit('template-changed', filePath);
-    });
+    }, 1000);
   }
 
   _isValidTemplate(filePath) {
     const basename = path.basename(filePath);
-    if (!basename.endsWith('.aepx')) return false;
-    if (basename.startsWith('.') || basename.startsWith('~')) return false;
+    if (!basename.toLowerCase().endsWith('.aepx')) return false;
+    if (isIgnoredName(basename)) return false;
+    if (filePath.includes(`${path.sep}_PastBrandings${path.sep}`)) return false;
     if (filePath.includes('Auto-Save')) return false;
-    if (filePath.includes('_PastBrandings')) return false;
-    return true;
+
+    const rel = path.relative(this.watchFolder, filePath);
+    if (!rel || rel.startsWith('..')) return false;
+    // Ignore nested random aepx outside first-level package / flat file
+    const parts = rel.split(path.sep);
+    if (parts.length === 1) return true; // flat
+    if (parts.length >= 2) return true; // inside package folder
+    return false;
   }
 
   stop() {
