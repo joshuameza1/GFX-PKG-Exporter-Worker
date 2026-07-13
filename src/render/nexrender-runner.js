@@ -1,4 +1,9 @@
 const nexrender = require('@nexrender/core');
+const {
+  isCommandLineRendererPatched,
+  installCommandLineRendererPatch,
+  withBlockedProcessExit,
+} = require('../../electron/ae-patch');
 
 class NexrenderRunner {
   constructor(config, log = console.log) {
@@ -16,14 +21,20 @@ class NexrenderRunner {
       throw new Error('nexrender workpath is not configured');
     }
 
+    // nexrender otherwise calls process.exit(2) when it can't write the AE patch,
+    // which kills the whole Electron app mid-render.
+    if (!isCommandLineRendererPatched(this.config.aerenderPath)) {
+      installCommandLineRendererPatch(this.config.aerenderPath, this.log);
+    }
+
     this.log(
       `Init nexrender — binary=${this.config.aerenderPath} workpath=${this.config.nexrenderWorkpath}`
     );
     const self = this;
-    this.settings = nexrender.init({
+    this.settings = withBlockedProcessExit(() => nexrender.init({
       workpath: this.config.nexrenderWorkpath,
       binary: this.config.aerenderPath,
-      skipCleanup: true, // keep work files for crash diagnosis
+      skipCleanup: true,
       stopOnError: true,
       debug: true,
       verbose: true,
@@ -31,7 +42,7 @@ class NexrenderRunner {
         log: (...args) => self.log(args.map(String).join(' ')),
         error: (...args) => self.log(args.map(String).join(' '), 'error'),
       },
-    });
+    }));
   }
 
   async renderJob(nexrenderConfig, { onProgress, onStateChange, onError } = {}) {
