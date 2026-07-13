@@ -76,7 +76,8 @@ function buildNexrenderConfigs(request, config) {
         src: templateSrc,
         // Keep Collect Files packages in place so footage/relatives stay valid.
         useOriginal: true,
-        composition: `^${request.type.split(' ').join('_')}`,
+        // Exact AE composition name (no ^). The caret breaks aerender -reuse Apple Events.
+        composition: request.type.split(' ').join('_'),
         outputModule,
         frameStart: frame.start_frame,
         frameEnd: frame.end_frame,
