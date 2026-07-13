@@ -70,7 +70,8 @@
       "provider": "github",
       "owner": "joshuameza1",
       "repo": "GFX-PKG-Exporter-Worker",
-      "private": true
+      "private": true,
+      "releaseType": "release"
     }
   }
 }
