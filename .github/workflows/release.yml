@@ -28,10 +28,12 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
 
-      - name: Build and publish unsigned release
+      - name: Ensure ae folder exists for packaging
+        run: mkdir -p ae
+
+      - name: Build, ad-hoc sign, and publish
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
-          CSC_IDENTITY_AUTO_DISCOVERY: false
         run: npm run release
 
       - name: Upload build artifacts

@@ -66,11 +66,17 @@ function setupAutoUpdater({ log, sendToRenderer: send }) {
   });
 
   autoUpdater.on('error', (err) => {
+    const raw = err.message || String(err);
+    let message = raw;
+    if (/not signed|code signature|code object is not signed/i.test(raw)) {
+      message =
+        'Auto-update requires a signed app. Download the latest .dmg from GitHub Releases and install it manually (right-click → Open).';
+    }
     sendToRenderer('update:status', {
       status: 'error',
-      message: err.message,
+      message,
     });
-    logFn(`Update error: ${err.message}`, 'error');
+    logFn(`Update error: ${message}`, 'error');
   });
 
   autoUpdater.on('download-progress', (progress) => {

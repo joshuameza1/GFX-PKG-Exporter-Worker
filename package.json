@@ -1,6 +1,6 @@
 {
   "name": "gfx-pkg-exporter",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "GFX PKG Exporter - After Effects render worker with Electron UI",
   "main": "electron/main.js",
   "author": "Elevation Church",
@@ -11,8 +11,8 @@
   "scripts": {
     "start": "electron .",
     "dev": "ELECTRON_IS_DEV=1 electron .",
-    "build": "CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac --publish never",
-    "release": "CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac --publish always"
+    "build": "electron-builder --mac --publish never",
+    "release": "electron-builder --mac --publish always"
   },
   "dependencies": {
     "@nexrender/core": "^1.46.5",
@@ -44,7 +44,11 @@
         }
       ],
       "category": "public.app-category.graphics-design",
-      "identity": null
+      "identity": "-",
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false,
+      "entitlements": "electron/entitlements.mac.plist",
+      "entitlementsInherit": "electron/entitlements.mac.plist"
     },
     "dmg": {
       "title": "GFX PKG Exporter ${version}"
