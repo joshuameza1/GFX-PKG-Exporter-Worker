@@ -8,7 +8,8 @@ let updateReady = false;
 function getUpdateToken() {
   if (process.env.GH_TOKEN) return process.env.GH_TOKEN;
   try {
-    return require('./github-token');
+    const token = require('./github-token');
+    return typeof token === 'string' ? token : '';
   } catch (_) {
     return '';
   }
@@ -21,10 +22,25 @@ function setupAutoUpdater({ log, sendToRenderer: send }) {
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = true;
 
+  if (!app.isPackaged) return;
+
   const token = getUpdateToken();
-  if (token) {
-    autoUpdater.requestHeaders = { Authorization: `token ${token}` };
+  if (!token) {
+    logFn('No GitHub token configured — update checks disabled', 'warn');
+    sendToRenderer('update:status', {
+      status: 'error',
+      message: 'Update token not configured in this build',
+    });
+    return;
   }
+
+  autoUpdater.setFeedURL({
+    provider: 'github',
+    owner: 'joshuameza1',
+    repo: 'GFX-PKG-Exporter-Worker',
+    private: true,
+    token,
+  });
 
   autoUpdater.on('checking-for-update', () => {
     sendToRenderer('update:status', { status: 'checking' });

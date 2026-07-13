@@ -24,7 +24,9 @@ jobs:
         run: npm ci
 
       - name: Write update token for installed apps
-        run: echo "module.exports = '${{ secrets.GH_TOKEN }}';" > electron/github-token.js
+        run: node -e "require('fs').writeFileSync('electron/github-token.js', 'module.exports = ' + JSON.stringify(process.env.GH_TOKEN) + ';')"
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
 
       - name: Build and publish unsigned release
         env:
