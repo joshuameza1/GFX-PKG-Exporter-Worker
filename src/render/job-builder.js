@@ -65,6 +65,8 @@ function buildNexrenderConfigs(request, config) {
     throw new Error(`No final_frames configured for "${request.type}"`);
   }
 
+  const copyActionModule = 'gfx-copy-output';
+
   const configs = frames.map((frame, i) => {
     const jobName = `${request.gfxpkg}${frame.suffix}_${i + 1}`;
     const outputFile = path.join(outputDir, `${jobName}.${request.outputExt}`);
@@ -73,7 +75,6 @@ function buildNexrenderConfigs(request, config) {
       template: {
         src: templateSrc,
         // Keep Collect Files packages in place so footage/relatives stay valid.
-        // Copying only the .aepx into Work/ was crashing mid-download / breaking AE.
         useOriginal: true,
         composition: `^${request.type.split(' ').join('_')}`,
         outputModule,
@@ -86,9 +87,10 @@ function buildNexrenderConfigs(request, config) {
       actions: {
         postrender: [
           {
-            module: '@nexrender/action-copy',
+            module: copyActionModule,
             input,
             output: outputFile,
+            preferExt: request.outputExt,
           },
         ],
       },

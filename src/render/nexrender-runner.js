@@ -4,12 +4,26 @@ const {
   installCommandLineRendererPatch,
   withBlockedProcessExit,
 } = require('../../electron/ae-patch');
+const { ensureAfterEffectsRunning } = require('./ae-keepalive');
 
 class NexrenderRunner {
   constructor(config, log = console.log) {
     this.config = config;
     this.log = typeof log === 'function' ? log : console.log;
     this.settings = null;
+    this._aeWarmPromise = null;
+  }
+
+  async ensureAeWarm() {
+    if (!this._aeWarmPromise) {
+      this._aeWarmPromise = ensureAfterEffectsRunning(this.config.aerenderPath, this.log)
+        .catch((err) => {
+          this.log(`AE keepalive failed: ${err.message}`, 'warn');
+          this._aeWarmPromise = null;
+          return null;
+        });
+    }
+    return this._aeWarmPromise;
   }
 
   _ensureInit() {
@@ -34,15 +48,18 @@ class NexrenderRunner {
     process.env.NEXRENDER_ENABLE_AELOG_PROJECT_FOLDER = 'true';
 
     const self = this;
+    // NOTE: do NOT set reuse/aerender -reuse — AE 2026 rejects that flag.
+    // Speed comes from keeping After Effects.app open instead.
     this.settings = withBlockedProcessExit(() => nexrender.init({
       workpath: this.config.nexrenderWorkpath,
       binary: this.config.aerenderPath,
       skipCleanup: true,
       stopOnError: true,
-      // Reuse a running AE instance so later jobs skip the ~45s cold launch.
-      reuse: true,
       debug: true,
       verbose: true,
+      actions: {
+        'gfx-copy-output': require('./action-copy-output'),
+      },
       logger: {
         log: (...args) => self.log(args.map(String).join(' ')),
         error: (...args) => self.log(args.map(String).join(' '), 'error'),
@@ -52,6 +69,7 @@ class NexrenderRunner {
 
   async renderJob(nexrenderConfig, { onProgress, onStateChange, onError } = {}) {
     this._ensureInit();
+    await this.ensureAeWarm();
 
     const templateSrc = nexrenderConfig?.template?.src;
     const composition = nexrenderConfig?.template?.composition;

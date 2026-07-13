@@ -22,7 +22,7 @@ const PHASE_LABELS = {
   'render:postdownload': 'Preparing assets…',
   'render:prerender': 'Preparing…',
   'render:script': 'Preparing script…',
-  'render:dorender': 'Launching After Effects…',
+  'render:dorender': 'Waiting on After Effects (keep AE open for speed)…',
   'render:postrender': 'Copying to render folder…',
   'render:cleanup': 'Finishing…',
 };
@@ -40,6 +40,8 @@ class JobProcessor extends EventEmitter {
 
   start() {
     this.running = true;
+    // Warm AE in the background so the first job isn't always a full cold start.
+    this.runner.ensureAeWarm().catch(() => {});
     this._tick();
   }
 
@@ -128,7 +130,12 @@ class JobProcessor extends EventEmitter {
                 }
                 const elapsed = (Date.now() - start) / 1000;
                 const synthetic = 25 + Math.min(50, elapsed * 0.85);
-                setProgress(synthetic, 'Launching After Effects…');
+                setProgress(
+                  synthetic,
+                  elapsed < 8
+                    ? 'Opening After Effects…'
+                    : 'Waiting on After Effects (keep AE open for speed)…'
+                );
               }, 400);
             } else if (state === 'render:postrender' || state === 'render:cleanup') {
               stopHeartbeat();
