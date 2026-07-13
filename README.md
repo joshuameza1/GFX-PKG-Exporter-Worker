@@ -10,14 +10,18 @@ cp .env.example .env   # edit with your paths and server URL
 npm run dev
 ```
 
-## First install on a Mac (DMG)
+## First install on a Mac (unsigned DMG)
+
+Builds are **not code-signed** (no Apple Developer account required). macOS will show a security warning on first launch — that's expected for internal use.
 
 1. Download the latest `.dmg` from [GitHub Releases](https://github.com/joshuameza1/GFX-PKG-Exporter-Worker/releases).
 2. Drag **GFX PKG Exporter** into Applications.
-3. On first launch, the app creates a config file at:
+3. **First launch:** right-click the app → **Open** → **Open** again in the dialog.  
+   Or go to **System Settings → Privacy & Security → Open Anyway**.
+4. The app creates a config file at:
    `~/Library/Application Support/GFX PKG Exporter/.env`
-4. Edit that `.env` with the machine's watch folder, render folder, socket URL, and AE path.
-5. Restart the app.
+5. Edit that `.env` with the machine's watch folder, render folder, socket URL, and AE path.
+6. Restart the app.
 
 Local config, job history, and template packages are stored outside the app bundle and are preserved across updates.
 
@@ -32,45 +36,28 @@ git tag v1.0.1
 git push origin v1.0.1
 ```
 
-GitHub Actions builds a signed universal Mac `.dmg` + `.zip`, notarizes it, and publishes to GitHub Releases. Installed apps check for updates on launch and via **Settings → Check for updates**.
+GitHub Actions builds an unsigned universal Mac `.dmg` + `.zip` and publishes to GitHub Releases. Installed apps check for updates on launch and via **Settings → Check for updates**.
 
-## Building locally (signed DMG)
-
-Export your Developer ID certificate and notarization credentials, then:
+## Building locally (unsigned DMG)
 
 ```bash
 npm install
 cp electron/github-token.js.example electron/github-token.js
 # Paste a read-only GitHub PAT into github-token.js for update checks
 
-export CSC_NAME="Developer ID Application: Your Name (TEAMID)"
-export APPLE_ID="you@example.com"
-export APPLE_APP_SPECIFIC_PASSWORD="xxxx-xxxx-xxxx-xxxx"
-export APPLE_TEAM_ID="TEAMID"
-
-npm run build
+npm run build        # outputs to dist/ — install locally
+npm run release      # build + publish to GitHub Releases (needs GH_TOKEN env var)
 ```
-
-Output lands in `dist/`. Use `npm run release` to also publish to GitHub Releases.
 
 ## GitHub Actions secrets
 
-Add these in the repo's **Settings → Secrets and variables → Actions**:
+Only **one secret** is required for unsigned releases:
 
 | Secret | Purpose |
 |---|---|
 | `GH_TOKEN` | Fine-grained PAT with repo contents read/write (releases + update checks) |
-| `CSC_LINK` | Base64-encoded `.p12` Developer ID certificate |
-| `CSC_KEY_PASSWORD` | Certificate password |
-| `APPLE_ID` | Apple ID used for notarization |
-| `APPLE_APP_SPECIFIC_PASSWORD` | App-specific password from appleid.apple.com |
-| `APPLE_TEAM_ID` | 10-character Team ID |
 
-To base64-encode your certificate:
-
-```bash
-base64 -i YourCert.p12 | pbcopy
-```
+You do **not** need Apple signing secrets (`CSC_LINK`, `APPLE_ID`, etc.) for unsigned builds.
 
 ## How updates work
 

@@ -11,8 +11,8 @@
   "scripts": {
     "start": "electron .",
     "dev": "ELECTRON_IS_DEV=1 electron .",
-    "build": "electron-builder --mac --publish never",
-    "release": "electron-builder --mac --publish always"
+    "build": "CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac --publish never",
+    "release": "CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac --publish always"
   },
   "dependencies": {
     "@nexrender/core": "^1.46.5",
@@ -44,10 +44,7 @@
         }
       ],
       "category": "public.app-category.graphics-design",
-      "hardenedRuntime": true,
-      "gatekeeperAssess": false,
-      "entitlements": "electron/entitlements.mac.plist",
-      "entitlementsInherit": "electron/entitlements.mac.plist"
+      "identity": null
     },
     "dmg": {
       "title": "GFX PKG Exporter ${version}"
