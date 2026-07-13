@@ -8,15 +8,21 @@ function getEnvPath() {
   }
 
   const userEnvPath = path.join(app.getPath('userData'), '.env');
+  // Prefer settings.json going forward. Only create a blank .env stub if missing —
+  // never copy example placeholder paths that break the first launch.
   if (!fs.existsSync(userEnvPath)) {
-    const examplePath = path.join(process.resourcesPath, '.env.example');
-    const fallbackExample = path.join(__dirname, '..', '.env.example');
-
-    if (fs.existsSync(examplePath)) {
-      fs.copyFileSync(examplePath, userEnvPath);
-    } else if (fs.existsSync(fallbackExample)) {
-      fs.copyFileSync(fallbackExample, userEnvPath);
-    }
+    fs.mkdirSync(path.dirname(userEnvPath), { recursive: true });
+    fs.writeFileSync(
+      userEnvPath,
+      [
+        '# Optional fallback. Prefer Settings in the app UI.',
+        'SOCKET_IO_URL=',
+        'WATCH_FOLDER=',
+        'RENDER_FOLDER=',
+        'CDN_URL=',
+        '',
+      ].join('\n')
+    );
   }
 
   return userEnvPath;

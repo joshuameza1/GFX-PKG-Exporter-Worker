@@ -751,22 +751,35 @@ function updateServerStatus(status) {
 
   const networkDot = document.getElementById('network-dot');
   const workerStatus = document.getElementById('network-worker-status');
+  const onlineBadge = document.getElementById('worker-online-badge');
 
   if (status === 'connected') {
     dot.classList.add('green');
     text.textContent = 'Connected';
     if (networkDot) { networkDot.className = 'dot green'; }
     if (workerStatus) workerStatus.textContent = 'Online';
+    if (onlineBadge) {
+      onlineBadge.className = 'badge badge-completed';
+      onlineBadge.textContent = 'Online';
+    }
   } else if (status === 'connecting') {
     dot.classList.add('yellow');
     text.textContent = 'Connecting';
     if (networkDot) { networkDot.className = 'dot yellow'; }
     if (workerStatus) workerStatus.textContent = 'Connecting';
+    if (onlineBadge) {
+      onlineBadge.className = 'badge badge-pending';
+      onlineBadge.textContent = 'Connecting';
+    }
   } else {
     dot.classList.add('red');
     text.textContent = 'Disconnected';
     if (networkDot) { networkDot.className = 'dot red'; }
     if (workerStatus) workerStatus.textContent = 'Offline';
+    if (onlineBadge) {
+      onlineBadge.className = 'badge badge-failed';
+      onlineBadge.textContent = 'Offline';
+    }
   }
 }
 
@@ -902,50 +915,65 @@ async function refreshJobs() {
 
 // ===== Initial load =====
 async function init() {
-  refreshJobs();
+  refreshJobs().catch(() => {});
 
-  const status = await window.api.getSocketStatus();
-  updateServerStatus(status || 'disconnected');
-
-  const templateInfo = await window.api.getTemplateInfo();
-  if (templateInfo) {
-    const pkgCount = templateInfo.packages ? templateInfo.packages.length : 0;
-    const liveCount = templateInfo.packages ? templateInfo.packages.filter((p) => p.isLive).length : 0;
-    document.getElementById('template-comp-count').textContent =
-      `${templateInfo.compositionCount} comp${templateInfo.compositionCount !== 1 ? 's' : ''}`;
-    document.getElementById('template-name').textContent =
-      pkgCount === 0 ? 'No packages' :
-      pkgCount === 1 ? templateInfo.packages[0].name :
-      `${liveCount} of ${pkgCount} live`;
-    renderPackageTree(templateInfo);
+  try {
+    const status = await window.api.getSocketStatus();
+    updateServerStatus(status || 'disconnected');
+  } catch (_) {
+    updateServerStatus('disconnected');
   }
 
-  const config = await window.api.getConfig();
-  if (config) {
-    applyConfigToUi(config);
-    if (config.needsSetup) {
-      showSetupOverlay(config.socketIoUrl || '');
+  try {
+    const templateInfo = await window.api.getTemplateInfo();
+    if (templateInfo) {
+      const pkgCount = templateInfo.packages ? templateInfo.packages.length : 0;
+      const liveCount = templateInfo.packages ? templateInfo.packages.filter((p) => p.isLive).length : 0;
+      document.getElementById('template-comp-count').textContent =
+        `${templateInfo.compositionCount} comp${templateInfo.compositionCount !== 1 ? 's' : ''}`;
+      document.getElementById('template-name').textContent =
+        pkgCount === 0 ? 'No packages' :
+        pkgCount === 1 ? templateInfo.packages[0].name :
+        `${liveCount} of ${pkgCount} live`;
+      renderPackageTree(templateInfo);
     }
-  }
+  } catch (_) {}
 
-  const ae = await window.api.getAeStatus();
-  const aeDot = document.getElementById('ae-dot');
-  const aeStatus = document.getElementById('ae-status');
-  const aeVersion = document.getElementById('ae-version');
-  if (ae && ae.status === 'ready') {
-    aeDot.className = 'dot green';
-    aeStatus.textContent = 'Ready';
-    aeVersion.textContent = ae.version ? `AE ${ae.version}` : 'Installed';
-    const workerAeInfo = document.getElementById('worker-ae-info');
-    if (workerAeInfo) workerAeInfo.innerHTML = `<span class="dot green" style="width:6px;height:6px;display:inline-block;border-radius:50%;flex-shrink:0"></span> ${ae.version ? `AE ${ae.version}` : 'Installed'}`;
-  } else {
-    aeDot.className = 'dot red';
-    aeStatus.textContent = 'Not found';
-    aeVersion.textContent = '—';
-    const workerAeInfo = document.getElementById('worker-ae-info');
-    if (workerAeInfo) workerAeInfo.innerHTML = `<span class="dot red" style="width:6px;height:6px;display:inline-block;border-radius:50%;flex-shrink:0"></span> Not found`;
-  }
+  try {
+    const config = await window.api.getConfig();
+    if (config) {
+      applyConfigToUi(config);
+      if (config.needsSetup) {
+        showSetupOverlay(config.socketIoUrl || '');
+      } else if (config.isPackaged) {
+        setUpdateUi({ status: 'current' });
+      }
+    }
+  } catch (_) {}
 
+  // Never block startup on AE probing.
+  window.api.getAeStatus().then((ae) => {
+    const aeDot = document.getElementById('ae-dot');
+    const aeStatus = document.getElementById('ae-status');
+    const aeVersion = document.getElementById('ae-version');
+    if (ae && ae.status === 'ready') {
+      aeDot.className = 'dot green';
+      aeStatus.textContent = 'Ready';
+      aeVersion.textContent = ae.version ? `AE ${ae.version}` : 'Installed';
+      const workerAeInfo = document.getElementById('worker-ae-info');
+      if (workerAeInfo) {
+        workerAeInfo.innerHTML = `<span class="dot green" style="width:6px;height:6px;display:inline-block;border-radius:50%;flex-shrink:0"></span> ${ae.version ? `AE ${ae.version}` : 'Installed'}`;
+      }
+    } else {
+      aeDot.className = 'dot red';
+      aeStatus.textContent = 'Not found';
+      aeVersion.textContent = '—';
+      const workerAeInfo = document.getElementById('worker-ae-info');
+      if (workerAeInfo) {
+        workerAeInfo.innerHTML = `<span class="dot red" style="width:6px;height:6px;display:inline-block;border-radius:50%;flex-shrink:0"></span> Not found`;
+      }
+    }
+  }).catch(() => {});
 }
 
 function applyConfigToUi(config) {
@@ -1014,17 +1042,22 @@ document.getElementById('setup-continue-btn')?.addEventListener('click', async (
     return;
   }
   btn.disabled = true;
-  const result = await window.api.saveSettings({ socketIoUrl: url });
-  btn.disabled = false;
-  if (result?.error) {
-    if (error) error.textContent = result.error;
-    return;
+  try {
+    const result = await window.api.saveSettings({ socketIoUrl: url });
+    if (result?.error) {
+      if (error) error.textContent = result.error;
+      return;
+    }
+    hideSetupOverlay();
+    applyConfigToUi({
+      ...(await window.api.getConfig()),
+      socketIoUrl: result.settings.socketIoUrl,
+    });
+  } catch (err) {
+    if (error) error.textContent = err.message || 'Failed to save';
+  } finally {
+    btn.disabled = false;
   }
-  hideSetupOverlay();
-  applyConfigToUi({
-    ...(await window.api.getConfig()),
-    socketIoUrl: result.settings.socketIoUrl,
-  });
 });
 
 document.getElementById('setup-server-url')?.addEventListener('keydown', (e) => {
@@ -1036,32 +1069,42 @@ document.getElementById('save-server-url-btn')?.addEventListener('click', async 
   const btn = document.getElementById('save-server-url-btn');
   btn.disabled = true;
   setSaveStatus('server-url-save-status', 'Saving...');
-  const result = await window.api.saveSettings({ socketIoUrl: (input?.value || '').trim() });
-  btn.disabled = false;
-  if (result?.error) {
-    setSaveStatus('server-url-save-status', result.error, 'err');
-    return;
+  try {
+    const result = await window.api.saveSettings({ socketIoUrl: (input?.value || '').trim() });
+    if (result?.error) {
+      setSaveStatus('server-url-save-status', result.error, 'err');
+      return;
+    }
+    setSaveStatus('server-url-save-status', 'Saved — reconnecting…', 'ok');
+    applyConfigToUi(await window.api.getConfig());
+  } catch (err) {
+    setSaveStatus('server-url-save-status', err.message || 'Save failed', 'err');
+  } finally {
+    btn.disabled = false;
   }
-  setSaveStatus('server-url-save-status', 'Saved — reconnecting…', 'ok');
-  applyConfigToUi(await window.api.getConfig());
 });
 
 document.getElementById('save-paths-btn')?.addEventListener('click', async () => {
   const btn = document.getElementById('save-paths-btn');
   btn.disabled = true;
   setSaveStatus('paths-save-status', 'Saving...');
-  const result = await window.api.saveSettings({
-    watchFolder: document.getElementById('setting-watch-folder')?.value.trim() || '',
-    renderFolder: document.getElementById('setting-render-folder')?.value.trim() || '',
-    cdnUrl: document.getElementById('setting-cdn-url')?.value.trim() || '',
-  });
-  btn.disabled = false;
-  if (result?.error) {
-    setSaveStatus('paths-save-status', result.error, 'err');
-    return;
+  try {
+    const result = await window.api.saveSettings({
+      watchFolder: document.getElementById('setting-watch-folder')?.value.trim() || '',
+      renderFolder: document.getElementById('setting-render-folder')?.value.trim() || '',
+      cdnUrl: document.getElementById('setting-cdn-url')?.value.trim() || '',
+    });
+    if (result?.error) {
+      setSaveStatus('paths-save-status', result.error, 'err');
+      return;
+    }
+    setSaveStatus('paths-save-status', 'Saved', 'ok');
+    applyConfigToUi(await window.api.getConfig());
+  } catch (err) {
+    setSaveStatus('paths-save-status', err.message || 'Save failed', 'err');
+  } finally {
+    btn.disabled = false;
   }
-  setSaveStatus('paths-save-status', 'Saved', 'ok');
-  applyConfigToUi(await window.api.getConfig());
 });
 
 window.api.onConfigUpdated?.((config) => {

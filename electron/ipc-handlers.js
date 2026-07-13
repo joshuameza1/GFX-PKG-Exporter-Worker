@@ -58,15 +58,19 @@ function registerIpcHandlers(ipcMain, services) {
   });
 
   ipcMain.handle('save-settings', (_, partial) => {
-    if (!saveAppSettings) {
-      return { error: 'Settings saving is unavailable' };
-    }
-    if (partial.socketIoUrl !== undefined) {
-      if (partial.socketIoUrl && !isValidServerUrl(partial.socketIoUrl)) {
-        return { error: 'Enter a valid http:// or https:// server URL' };
+    try {
+      if (!saveAppSettings) {
+        return { error: 'Settings saving is unavailable' };
       }
+      if (partial.socketIoUrl !== undefined) {
+        if (partial.socketIoUrl && !isValidServerUrl(partial.socketIoUrl)) {
+          return { error: 'Enter a valid http:// or https:// server URL' };
+        }
+      }
+      return saveAppSettings(partial);
+    } catch (err) {
+      return { error: err.message || 'Failed to save settings' };
     }
-    return saveAppSettings(partial);
   });
 
   ipcMain.handle('check-for-updates', () => checkForUpdates({ silent: false }));
@@ -142,18 +146,28 @@ function registerIpcHandlers(ipcMain, services) {
 
   ipcMain.handle('get-ae-status', () => {
     const aerenderPath = config.aerenderPath;
-    if (!fs.existsSync(aerenderPath)) {
+    if (!aerenderPath || !fs.existsSync(aerenderPath)) {
       return { status: 'not-found', version: null };
     }
     return new Promise((resolve) => {
-      execFile(aerenderPath, ['-help'], { timeout: 5000 }, (err, stdout, stderr) => {
-        const output = (stdout || '') + (stderr || '');
-        const match = output.match(/aerender version (\S+)/);
-        resolve({
-          status: 'ready',
-          version: match ? match[1] : 'installed',
-        });
-      });
+      execFile(
+        aerenderPath,
+        ['-help'],
+        { timeout: 3000, killSignal: 'SIGKILL' },
+        (err, stdout, stderr) => {
+          const output = `${stdout || ''}${stderr || ''}`;
+          const match = output.match(/aerender version (\S+)/);
+          if (match) {
+            resolve({ status: 'ready', version: match[1] });
+            return;
+          }
+          if (err) {
+            resolve({ status: 'not-found', version: null });
+            return;
+          }
+          resolve({ status: 'ready', version: 'installed' });
+        }
+      );
     });
   });
 

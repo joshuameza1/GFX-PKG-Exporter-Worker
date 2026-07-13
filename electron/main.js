@@ -96,61 +96,91 @@ app.whenReady().then(() => {
     processor,
     getSettings: () => loadSettings(),
     saveAppSettings: (partial) => {
-      const prevUrl = config.socketIoUrl;
-      const prevWatch = config.watchFolder;
-      const next = saveSettings(partial);
-      applySettingsToConfig(config, next);
+      try {
+        const prevUrl = config.socketIoUrl;
+        const prevWatch = config.watchFolder;
+        const next = saveSettings(partial);
+        applySettingsToConfig(config, next);
 
-      if (config.socketIoUrl !== prevUrl) {
-        if (isValidServerUrl(config.socketIoUrl)) {
-          log(`Connecting to ${config.socketIoUrl}...`);
-          socketClient.reconnect(config.socketIoUrl);
-        } else {
-          socketClient.disconnect();
-          log('Server URL cleared — disconnected', 'warn');
-        }
+        // Return immediately; reconnect/watch work must not block Settings UI.
+        setImmediate(() => {
+          try {
+            if (config.socketIoUrl !== prevUrl) {
+              if (isValidServerUrl(config.socketIoUrl)) {
+                log(`Connecting to ${config.socketIoUrl}...`);
+                socketClient.reconnect(config.socketIoUrl);
+              } else {
+                socketClient.disconnect();
+                log('Server URL cleared — disconnected', 'warn');
+              }
+            }
+
+            if (config.watchFolder !== prevWatch) {
+              templateParser.watchFolder = config.watchFolder;
+              if (config.watchFolder) restartWatcher();
+              else if (watcher) watcher.stop();
+              log(`Watch folder updated: ${config.watchFolder || '(none)'}`);
+            }
+
+            if (!needsSetup(next) && app.isPackaged) {
+              scheduleUpdateCheck();
+            }
+
+            sendToRenderer('config:updated', {
+              socketIoUrl: config.socketIoUrl,
+              watchFolder: config.watchFolder,
+              renderFolder: config.renderFolder,
+              cdnUrl: config.cdnUrl,
+              settingsPath: getSettingsPath(),
+              needsSetup: needsSetup(next),
+              hostname: require('os').hostname(),
+              appVersion: app.getVersion(),
+              isPackaged: app.isPackaged,
+            });
+          } catch (err) {
+            log(`Settings apply failed: ${err.message}`, 'error');
+          }
+        });
+
+        return {
+          settings: next,
+          needsSetup: needsSetup(next),
+        };
+      } catch (err) {
+        return { error: err.message || 'Failed to save settings' };
       }
-
-      if (config.watchFolder !== prevWatch) {
-        templateParser.watchFolder = config.watchFolder;
-        restartWatcher();
-        log(`Watch folder updated: ${config.watchFolder || '(none)'}`);
-      }
-
-      sendToRenderer('config:updated', {
-        socketIoUrl: config.socketIoUrl,
-        watchFolder: config.watchFolder,
-        renderFolder: config.renderFolder,
-        cdnUrl: config.cdnUrl,
-        settingsPath: getSettingsPath(),
-        needsSetup: needsSetup(next),
-      });
-
-      return {
-        settings: next,
-        needsSetup: needsSetup(next),
-      };
     },
   });
 
   setupAutoUpdater({ log, sendToRenderer });
 
-  if (app.isPackaged) {
+  let updateCheckScheduled = false;
+  function scheduleUpdateCheck() {
+    if (!app.isPackaged || updateCheckScheduled) return;
+    if (needsSetup(loadSettings())) return;
+    updateCheckScheduled = true;
     setTimeout(() => {
-      checkForUpdates({ silent: true });
-    }, 5000);
+      checkForUpdates({ silent: true }).catch((err) => {
+        log(`Update check failed: ${err.message}`, 'warn');
+      });
+    }, 8000);
   }
 
   socketClient.on('status', (status) => {
     sendToRenderer('socket:status', status);
     if (status === 'connected') {
       log('Connected to server');
-      templateParser.parseAllTemplates().then((liveGraphics) => {
-        if (liveGraphics && liveGraphics.length > 0) {
-          socketClient.emit('updateSlackAppUI', liveGraphics);
-          log(`Pushed ${liveGraphics.length} compositions to Slack`);
-        }
-        sendTemplateUpdate();
+      // Parse off the event turn so status updates aren't delayed.
+      setImmediate(() => {
+        templateParser.parseAllTemplates()
+          .then((liveGraphics) => {
+            if (liveGraphics && liveGraphics.length > 0) {
+              socketClient.emit('updateSlackAppUI', liveGraphics);
+              log(`Pushed ${liveGraphics.length} compositions to Slack`);
+            }
+            sendTemplateUpdate();
+          })
+          .catch((err) => log(`Template parse failed: ${err.message}`, 'error'));
       });
     } else if (status === 'disconnected') {
       log('Disconnected from server', 'warn');
@@ -177,6 +207,7 @@ app.whenReady().then(() => {
 
   if (isValidServerUrl(config.socketIoUrl) && !needsSetup(settings)) {
     socketClient.connect();
+    scheduleUpdateCheck();
   } else {
     log('Setup required — open Settings or complete first-launch setup', 'warn');
   }

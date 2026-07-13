@@ -110,9 +110,18 @@ async function checkForUpdates({ silent = false } = {}) {
   }
 
   try {
-    await autoUpdater.checkForUpdates();
-    return { status: 'checking' };
+    const result = await Promise.race([
+      autoUpdater.checkForUpdates(),
+      new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('Update check timed out')), 20000);
+      }),
+    ]);
+    return { status: 'checking', result };
   } catch (err) {
+    sendToRenderer('update:status', {
+      status: 'error',
+      message: err.message,
+    });
     if (!silent) {
       await dialog.showMessageBox({
         type: 'error',

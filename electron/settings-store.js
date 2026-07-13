@@ -12,6 +12,23 @@ function getSettingsPath() {
   return path.join(app.getPath('userData'), 'settings.json');
 }
 
+function isPlaceholderPath(value) {
+  const v = (value || '').trim().toLowerCase();
+  if (!v) return true;
+  return (
+    v.includes('/path/to/')
+    || v.includes('\\path\\to\\')
+    || v === 'example.com'
+    || v.includes('your-server.example')
+    || v.includes('cdn.example.com')
+  );
+}
+
+function cleanPath(value) {
+  const v = (value || '').trim();
+  return isPlaceholderPath(v) ? '' : v;
+}
+
 function readSettingsFile() {
   const filePath = getSettingsPath();
   if (!fs.existsSync(filePath)) return null;
@@ -48,10 +65,11 @@ function buildDefaultsFromEnv() {
   return {
     setupComplete: false,
     socketIoUrl: normalizeUrl(process.env.SOCKET_IO_URL),
-    watchFolder: process.env.WATCH_FOLDER || '',
-    renderFolder: process.env.RENDER_FOLDER || '',
-    cdnUrl: process.env.CDN_URL || '',
-    aerenderPath: process.env.AERENDER_PATH || '/Applications/Adobe After Effects 2026/aerender',
+    watchFolder: cleanPath(process.env.WATCH_FOLDER),
+    renderFolder: cleanPath(process.env.RENDER_FOLDER),
+    cdnUrl: cleanPath(process.env.CDN_URL) || '',
+    aerenderPath: cleanPath(process.env.AERENDER_PATH)
+      || '/Applications/Adobe After Effects 2026/aerender',
   };
 }
 
@@ -63,6 +81,9 @@ function loadSettings() {
     ...defaults,
     ...stored,
     socketIoUrl: normalizeUrl(stored.socketIoUrl || defaults.socketIoUrl),
+    watchFolder: cleanPath(stored.watchFolder ?? defaults.watchFolder),
+    renderFolder: cleanPath(stored.renderFolder ?? defaults.renderFolder),
+    cdnUrl: cleanPath(stored.cdnUrl ?? defaults.cdnUrl) || (stored.cdnUrl || ''),
   };
 }
 
@@ -74,9 +95,9 @@ function needsSetup(settings) {
 
 function applySettingsToConfig(config, settings) {
   config.socketIoUrl = normalizeUrl(settings.socketIoUrl);
-  config.watchFolder = settings.watchFolder || config.watchFolder;
-  config.renderFolder = settings.renderFolder || config.renderFolder;
-  config.cdnUrl = settings.cdnUrl || config.cdnUrl;
+  config.watchFolder = cleanPath(settings.watchFolder);
+  config.renderFolder = cleanPath(settings.renderFolder);
+  config.cdnUrl = settings.cdnUrl || '';
   if (settings.aerenderPath) config.aerenderPath = settings.aerenderPath;
   return config;
 }
@@ -86,7 +107,16 @@ function saveSettings(partial) {
   const next = {
     ...current,
     ...partial,
-    socketIoUrl: normalizeUrl(partial.socketIoUrl !== undefined ? partial.socketIoUrl : current.socketIoUrl),
+    socketIoUrl: normalizeUrl(
+      partial.socketIoUrl !== undefined ? partial.socketIoUrl : current.socketIoUrl
+    ),
+    watchFolder: cleanPath(
+      partial.watchFolder !== undefined ? partial.watchFolder : current.watchFolder
+    ),
+    renderFolder: cleanPath(
+      partial.renderFolder !== undefined ? partial.renderFolder : current.renderFolder
+    ),
+    cdnUrl: partial.cdnUrl !== undefined ? partial.cdnUrl.trim() : current.cdnUrl,
     setupComplete: true,
   };
   writeSettingsFile(next);
@@ -101,4 +131,6 @@ module.exports = {
   isValidServerUrl,
   applySettingsToConfig,
   normalizeUrl,
+  cleanPath,
+  isPlaceholderPath,
 };
