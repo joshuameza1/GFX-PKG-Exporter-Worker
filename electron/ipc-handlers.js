@@ -14,6 +14,7 @@ const {
   isValidServerUrl,
   getSettingsPath,
 } = require('./settings-store');
+const { resolveAerenderPath } = require('./ae-paths');
 
 function registerIpcHandlers(ipcMain, services) {
   const {
@@ -48,6 +49,7 @@ function registerIpcHandlers(ipcMain, services) {
       cdnUrl: config.cdnUrl,
       hostname: os.hostname(),
       appVersion: app.getVersion(),
+      aerenderPath: config.aerenderPath || null,
       envPath: getEnvPath(),
       settingsPath: getSettingsPath(),
       isPackaged: app.isPackaged,
@@ -146,27 +148,34 @@ function registerIpcHandlers(ipcMain, services) {
   });
 
   ipcMain.handle('get-ae-status', () => {
-    const aerenderPath = config.aerenderPath;
-    if (!aerenderPath || !fs.existsSync(aerenderPath)) {
-      return { status: 'not-found', version: null };
+    const aerenderPath = resolveAerenderPath(config.aerenderPath);
+    if (!aerenderPath) {
+      return { status: 'not-found', version: null, path: null };
     }
+
+    // Keep renders pointed at whatever we actually found.
+    config.aerenderPath = aerenderPath;
+
     return new Promise((resolve) => {
       execFile(
         aerenderPath,
         ['-help'],
-        { timeout: 3000, killSignal: 'SIGKILL' },
+        { timeout: 15000, killSignal: 'SIGKILL' },
         (err, stdout, stderr) => {
           const output = `${stdout || ''}${stderr || ''}`;
-          const match = output.match(/aerender version (\S+)/);
+          const match = output.match(/aerender version (\S+)/i);
+          // aerender often exits non-zero even when -help succeeds.
           if (match) {
-            resolve({ status: 'ready', version: match[1] });
+            resolve({ status: 'ready', version: match[1], path: aerenderPath });
             return;
           }
-          if (err) {
-            resolve({ status: 'not-found', version: null });
-            return;
-          }
-          resolve({ status: 'ready', version: 'installed' });
+          // Binary exists — treat as installed even if probing is flaky.
+          resolve({
+            status: 'ready',
+            version: 'installed',
+            path: aerenderPath,
+            probeError: err ? String(err.message || err) : null,
+          });
         }
       );
     });

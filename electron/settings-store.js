@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const { app } = require('electron');
+const { resolveAerenderPath } = require('./ae-paths');
 
 const PLACEHOLDER_URLS = new Set([
   '',
@@ -68,8 +69,7 @@ function buildDefaultsFromEnv() {
     watchFolder: cleanPath(process.env.WATCH_FOLDER),
     renderFolder: cleanPath(process.env.RENDER_FOLDER),
     cdnUrl: cleanPath(process.env.CDN_URL) || '',
-    aerenderPath: cleanPath(process.env.AERENDER_PATH)
-      || '/Applications/Adobe After Effects 2026/aerender',
+    aerenderPath: cleanPath(process.env.AERENDER_PATH) || '',
   };
 }
 
@@ -98,7 +98,8 @@ function applySettingsToConfig(config, settings) {
   config.watchFolder = cleanPath(settings.watchFolder);
   config.renderFolder = cleanPath(settings.renderFolder);
   config.cdnUrl = settings.cdnUrl || '';
-  if (settings.aerenderPath) config.aerenderPath = settings.aerenderPath;
+  const preferred = cleanPath(settings.aerenderPath) || cleanPath(config.aerenderPath);
+  config.aerenderPath = resolveAerenderPath(preferred) || preferred || '';
   return config;
 }
 

@@ -7,6 +7,6 @@ module.exports = {
   renderFolder: process.env.RENDER_FOLDER,
   cdnUrl: process.env.CDN_URL,
   nexrenderWorkpath: process.env.NEXRENDER_WORKPATH || path.join(os.tmpdir(), 'nexrender'),
-  aerenderPath: process.env.AERENDER_PATH || '/Applications/Adobe After Effects 2026/aerender',
+  aerenderPath: process.env.AERENDER_PATH || '',
   debug: process.env.DEBUG === 'true',
 };
