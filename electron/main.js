@@ -1,5 +1,6 @@
 const { app, BrowserWindow, ipcMain, dialog } = require('electron');
 const path = require('path');
+const fs = require('fs');
 
 const { loadEnv } = require('./env-loader');
 loadEnv();
@@ -65,6 +66,24 @@ function restartWatcher() {
   watcher.start();
 }
 
+function markCrash(err) {
+  try {
+    const flag = path.join(app.getPath('userData'), '.last-crash');
+    fs.writeFileSync(flag, `${new Date().toISOString()}\n${err && (err.stack || err.message || String(err))}\n`);
+  } catch (_) {
+    // ignore
+  }
+}
+
+process.on('uncaughtException', (err) => {
+  console.error('[uncaughtException]', err);
+  markCrash(err);
+});
+process.on('unhandledRejection', (err) => {
+  console.error('[unhandledRejection]', err);
+  markCrash(err);
+});
+
 app.whenReady().then(() => {
   let jobStore = null;
   let processor = null;
@@ -72,8 +91,17 @@ app.whenReady().then(() => {
   let initError = null;
 
   // Register IPC before the window loads so Settings / update never race a failed service init.
+  const userData = app.getPath('userData');
+  const crashFlagPath = path.join(userData, '.last-crash');
   try {
-    jobStore = new JobStore(path.join(app.getPath('userData'), 'jobs.db'));
+    jobStore = new JobStore(path.join(userData, 'jobs.db'));
+    if (fs.existsSync(crashFlagPath)) {
+      const cleared = jobStore.failActiveJobs(
+        'Cleared after previous app crash — retry from Queue if needed'
+      );
+      try { fs.unlinkSync(crashFlagPath); } catch (_) {}
+      console.warn(`[warn] Previous crash detected — failed ${cleared} active job(s)`);
+    }
   } catch (err) {
     initError = err;
     console.error('[error] JobStore failed to open:', err);
@@ -253,7 +281,17 @@ app.whenReady().then(() => {
     restartWatcher();
   }
 
-  if (processor) processor.start();
+  // Delay the queue so the window can open even if a render hard-crashes.
+  if (processor) {
+    setTimeout(() => {
+      try {
+        processor.start();
+        log('Render queue started');
+      } catch (err) {
+        log(`Render queue failed to start: ${err.message}`, 'error');
+      }
+    }, 2500);
+  }
   log('GFX PKG Exporter started');
 }).catch((err) => {
   console.error('[fatal] App failed to start:', err);
