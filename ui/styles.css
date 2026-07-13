@@ -37,6 +37,18 @@ body {
   height: 100vh;
 }
 
+/* Invisible drag strip for moving the window from the top content area */
+#drag-bar {
+  position: fixed;
+  top: 0;
+  left: 76px;
+  right: 0;
+  height: 36px;
+  -webkit-app-region: drag;
+  pointer-events: none;
+  z-index: 9000;
+}
+
 /* ===== Sidebar ===== */
 #sidebar {
   width: 76px;
@@ -478,13 +490,26 @@ body {
 
 .template-sidebar {
   width: 210px;
+  min-width: 140px;
+  max-width: 400px;
   background: var(--bg-sidebar);
-  border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
   overflow-y: auto;
   flex-shrink: 0;
 }
+
+.sidebar-resize-handle {
+  width: 4px;
+  cursor: col-resize;
+  background: var(--border);
+  flex-shrink: 0;
+  transition: background 0.15s;
+  position: relative;
+  z-index: 1;
+}
+.sidebar-resize-handle:hover,
+.sidebar-resize-handle.resizing { background: var(--accent); }
 
 .template-sidebar-header {
   padding: 14px 12px 8px;
@@ -567,39 +592,6 @@ body {
   background: #1a2a1e;
 }
 
-.pkg-order-controls {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  opacity: 0;
-  transition: opacity 0.1s;
-  flex-shrink: 0;
-}
-
-.pkg-header:hover .pkg-order-controls { opacity: 1; }
-
-.pkg-order-btn {
-  background: none;
-  border: none;
-  color: var(--text-muted);
-  font-size: 11px;
-  padding: 1px 3px;
-  cursor: pointer;
-  border-radius: 3px;
-  line-height: 1;
-  font-family: var(--font);
-}
-
-.pkg-order-btn:hover:not(:disabled) {
-  color: var(--text-primary);
-  background: rgba(255,255,255,0.07);
-}
-
-.pkg-order-btn:disabled {
-  opacity: 0.2;
-  cursor: default;
-}
-
 .pkg-delete-btn {
   background: none;
   border: none;
@@ -610,12 +602,151 @@ body {
   border-radius: 3px;
   line-height: 1;
   font-family: var(--font);
+  opacity: 0;
+  transition: opacity 0.1s;
+  flex-shrink: 0;
 }
+
+.pkg-header:hover .pkg-delete-btn { opacity: 1; }
 
 .pkg-delete-btn:hover {
   color: #e05555;
   background: rgba(224,85,85,0.1);
 }
+
+/* ===== Drag handle ===== */
+.drag-handle {
+  cursor: grab;
+  color: var(--text-dim);
+  font-size: 13px;
+  line-height: 1;
+  flex-shrink: 0;
+  padding: 0 2px;
+  opacity: 0;
+  transition: opacity 0.1s;
+  user-select: none;
+}
+
+.pkg-header:hover .drag-handle,
+.folder-row:hover .drag-handle { opacity: 1; }
+
+.drag-handle:active { cursor: grabbing; }
+
+/* ===== pkg-row wrapper (new) ===== */
+.pkg-row { position: relative; }
+
+.pkg-row.dragging { opacity: 0.35; }
+
+.pkg-row.drop-before::before,
+.pkg-row.drop-after::after {
+  content: '';
+  display: block;
+  height: 2px;
+  background: var(--accent);
+  border-radius: 2px;
+  margin: 0 8px;
+}
+
+/* ===== Folder styles ===== */
+.folder-group { position: relative; }
+
+.folder-row {
+  padding: 6px 12px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.folder-row:hover { background: rgba(255,255,255,0.03); }
+
+.folder-row.dragging { opacity: 0.35; }
+
+.folder-row.drop-before::before,
+.folder-row.drop-after::after {
+  content: '';
+  display: block;
+  height: 2px;
+  background: var(--accent);
+  border-radius: 2px;
+  position: absolute;
+  left: 8px;
+  right: 8px;
+}
+
+.folder-row.drop-before::before { top: 0; }
+.folder-row.drop-after::after  { bottom: 0; }
+
+.folder-row.drop-into,
+.folder-contents.drop-into,
+.ungrouped-section.drop-into {
+  background: rgba(91,127,245,0.08);
+  border-radius: 4px;
+}
+
+.folder-chevron {
+  width: 12px;
+  height: 12px;
+  color: var(--text-muted);
+  transition: transform 0.15s;
+  flex-shrink: 0;
+}
+.folder-chevron.expanded { transform: rotate(90deg); }
+
+.folder-icon {
+  width: 13px;
+  height: 13px;
+  color: #8b7cf6;
+  flex-shrink: 0;
+}
+
+.folder-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.folder-controls {
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 0.1s;
+  flex-shrink: 0;
+}
+.folder-row:hover .folder-controls { opacity: 1; }
+
+.folder-rename-btn,
+.folder-delete-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 12px;
+  padding: 1px 3px;
+  cursor: pointer;
+  border-radius: 3px;
+  font-family: var(--font);
+  line-height: 1;
+}
+.folder-rename-btn:hover { color: var(--text-primary); background: rgba(255,255,255,0.06); }
+.folder-delete-btn:hover { color: #e05555; background: rgba(224,85,85,0.1); }
+
+.folder-contents { padding-left: 8px; }
+
+.folder-empty-hint {
+  padding: 6px 12px;
+  font-size: 11px;
+  color: var(--text-dim);
+  font-style: italic;
+}
+
+.ungrouped-section { min-height: 8px; }
 
 .remove-pkg-btn {
   background: none;

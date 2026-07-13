@@ -100,38 +100,93 @@ function extractGraphics(project) {
   return graphics;
 }
 
+const LAYOUT_FILE = '.gfx-layout.json';
+
 class TemplateParser {
   constructor(watchFolder) {
     this.watchFolder = watchFolder;
     // filePath → { name, graphics, isLive }
     this.packages = new Map();
+    // { folders: [{name, packages:[basename]}], ungrouped:[basename] }
+    this.layout = { folders: [], ungrouped: [] };
   }
 
-  // Called on connect — loads every .aepx in the watch folder, all start live
+  // ── Layout persistence ────────────────────────────────────────────
+  _layoutPath() {
+    return path.join(this.watchFolder, LAYOUT_FILE);
+  }
+
+  _loadLayout() {
+    try {
+      const raw = fs.readFileSync(this._layoutPath(), 'utf8');
+      const p = JSON.parse(raw);
+      this.layout = { folders: p.folders || [], ungrouped: p.ungrouped || [] };
+    } catch {
+      this.layout = { folders: [], ungrouped: [] };
+    }
+  }
+
+  _saveLayout() {
+    if (!this.watchFolder || !fs.existsSync(this.watchFolder)) return;
+    try {
+      fs.writeFileSync(this._layoutPath(), JSON.stringify(this.layout, null, 2));
+    } catch (err) {
+      console.error('[template-parser] Failed to save layout:', err);
+    }
+  }
+
+  _addToLayoutIfMissing(basename) {
+    const inFolder = this.layout.folders.some((f) => f.packages.includes(basename));
+    if (!inFolder && !this.layout.ungrouped.includes(basename)) {
+      this.layout.ungrouped.push(basename);
+    }
+  }
+
+  _removeFromLayout(basename) {
+    this.layout.ungrouped = this.layout.ungrouped.filter((b) => b !== basename);
+    for (const f of this.layout.folders) {
+      f.packages = f.packages.filter((b) => b !== basename);
+    }
+  }
+
+  _pruneLayout() {
+    const loaded = new Set(Array.from(this.packages.keys()).map((fp) => path.basename(fp)));
+    this.layout.ungrouped = this.layout.ungrouped.filter((b) => loaded.has(b));
+    for (const f of this.layout.folders) {
+      f.packages = f.packages.filter((b) => loaded.has(b));
+    }
+  }
+
+  // ── Core parsing ──────────────────────────────────────────────────
   async parseAllTemplates() {
     if (!this.watchFolder || !fs.existsSync(this.watchFolder)) return [];
+    this._loadLayout();
     const files = fs.readdirSync(this.watchFolder).filter(
       (f) => f.endsWith('.aepx') && !f.startsWith('.') && !f.startsWith('~')
     );
     for (const fileName of files) {
       const filePath = path.join(this.watchFolder, fileName);
       await this._parseFile(filePath, true);
+      this._addToLayoutIfMissing(fileName);
     }
+    this._pruneLayout();
+    this._saveLayout();
     return this.getLiveGraphics();
   }
 
-  // Called when a file is added via the + button — starts NOT live
   async addPackage(filePath) {
     await this._parseFile(filePath, false);
+    this._addToLayoutIfMissing(path.basename(filePath));
+    this._saveLayout();
   }
 
-  // Called when a file on disk changes — preserves live state
   async updatePackage(filePath) {
     const existing = this.packages.get(filePath);
     const wasLive = existing ? existing.isLive : true;
     await this._parseFile(filePath, wasLive);
   }
 
+  // ── Package operations ────────────────────────────────────────────
   setLive(filePath, isLive) {
     const pkg = this.packages.get(filePath);
     if (pkg) pkg.isLive = isLive;
@@ -139,21 +194,63 @@ class TemplateParser {
 
   removePackage(filePath) {
     this.packages.delete(filePath);
+    this._removeFromLayout(path.basename(filePath));
+    this._saveLayout();
   }
 
-  movePackage(filePath, direction) {
-    const entries = Array.from(this.packages.entries());
-    const idx = entries.findIndex(([fp]) => fp === filePath);
-    if (direction === 'up' && idx > 0) {
-      [entries[idx - 1], entries[idx]] = [entries[idx], entries[idx - 1]];
-    } else if (direction === 'down' && idx < entries.length - 1) {
-      [entries[idx], entries[idx + 1]] = [entries[idx + 1], entries[idx]];
+  setPackageFolder(filePath, folderName) {
+    const basename = path.basename(filePath);
+    this._removeFromLayout(basename);
+    if (folderName) {
+      let folder = this.layout.folders.find((f) => f.name === folderName);
+      if (!folder) {
+        folder = { name: folderName, packages: [] };
+        this.layout.folders.push(folder);
+      }
+      folder.packages.push(basename);
     } else {
-      return; // nothing to do
+      this.layout.ungrouped.push(basename);
     }
-    this.packages = new Map(entries);
+    this._saveLayout();
   }
 
+  // ── Layout operations ─────────────────────────────────────────────
+  setLayout(newLayout) {
+    this.layout = {
+      folders: (newLayout.folders || []).map((f) => ({
+        name: f.name,
+        packages: f.packages || [],
+      })),
+      ungrouped: newLayout.ungrouped || [],
+    };
+    this._saveLayout();
+  }
+
+  createFolder(name) {
+    if (!this.layout.folders.find((f) => f.name === name)) {
+      this.layout.folders.push({ name, packages: [] });
+      this._saveLayout();
+    }
+  }
+
+  renameFolder(oldName, newName) {
+    const folder = this.layout.folders.find((f) => f.name === oldName);
+    if (folder && !this.layout.folders.find((f) => f.name === newName)) {
+      folder.name = newName;
+      this._saveLayout();
+    }
+  }
+
+  deleteFolder(name) {
+    const idx = this.layout.folders.findIndex((f) => f.name === name);
+    if (idx >= 0) {
+      this.layout.ungrouped.push(...this.layout.folders[idx].packages);
+      this.layout.folders.splice(idx, 1);
+      this._saveLayout();
+    }
+  }
+
+  // ── Data access ───────────────────────────────────────────────────
   getLiveGraphics() {
     const all = [];
     for (const pkg of this.packages.values()) {
@@ -163,13 +260,40 @@ class TemplateParser {
   }
 
   getAllPackages() {
-    return Array.from(this.packages.entries()).map(([filePath, pkg]) => ({
-      filePath,
-      name: pkg.name.replace('.aepx', ''),
-      graphics: pkg.graphics,
-      isLive: pkg.isLive,
-      compositionCount: pkg.graphics.length,
-    }));
+    const result = [];
+    const addPkg = (basename, folderName) => {
+      const filePath = path.join(this.watchFolder, basename);
+      const pkg = this.packages.get(filePath);
+      if (pkg) {
+        result.push({
+          filePath,
+          name: pkg.name.replace('.aepx', ''),
+          graphics: pkg.graphics,
+          isLive: pkg.isLive,
+          compositionCount: pkg.graphics.length,
+          folder: folderName || null,
+        });
+      }
+    };
+    for (const f of this.layout.folders) {
+      for (const b of f.packages) addPkg(b, f.name);
+    }
+    for (const b of this.layout.ungrouped) addPkg(b, null);
+    // Safety net: anything not yet in layout
+    const inResult = new Set(result.map((p) => p.filePath));
+    for (const [filePath, pkg] of this.packages.entries()) {
+      if (!inResult.has(filePath)) {
+        result.push({
+          filePath,
+          name: pkg.name.replace('.aepx', ''),
+          graphics: pkg.graphics,
+          isLive: pkg.isLive,
+          compositionCount: pkg.graphics.length,
+          folder: null,
+        });
+      }
+    }
+    return result;
   }
 
   getCurrentInfo() {
@@ -177,14 +301,13 @@ class TemplateParser {
     const liveGraphics = this.getLiveGraphics();
     return {
       packages,
+      folders: this.layout.folders.map((f) => f.name),
       graphics: liveGraphics,
       compositionCount: liveGraphics.length,
-      // backwards compat for dashboard card
       template: packages.length > 0 ? { name: packages[0].name } : null,
     };
   }
 
-  // Keep for ipc-handlers compatibility
   get lastGraphics() {
     return this.getLiveGraphics();
   }

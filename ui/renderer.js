@@ -56,6 +56,45 @@ document.getElementById('add-package-btn')?.addEventListener('click', async () =
   }
 });
 
+// ===== Add folder =====
+document.getElementById('add-folder-btn')?.addEventListener('click', async () => {
+  const name = prompt('Folder name:');
+  if (!name || !name.trim()) return;
+  const info = await window.api.createFolder(name.trim());
+  if (info) renderPackageTree(info);
+});
+
+// ===== Sidebar resize =====
+(function setupSidebarResize() {
+  const handle = document.getElementById('sidebar-resize-handle');
+  const sidebar = document.querySelector('.template-sidebar');
+  if (!handle || !sidebar) return;
+  let isResizing = false, startX = 0, startWidth = 0;
+  const MIN = 140, MAX = 400;
+
+  handle.addEventListener('mousedown', (e) => {
+    isResizing = true;
+    startX = e.clientX;
+    startWidth = sidebar.offsetWidth;
+    handle.classList.add('resizing');
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    e.preventDefault();
+  });
+  document.addEventListener('mousemove', (e) => {
+    if (!isResizing) return;
+    const w = Math.max(MIN, Math.min(MAX, startWidth + (e.clientX - startX)));
+    sidebar.style.width = w + 'px';
+  });
+  document.addEventListener('mouseup', () => {
+    if (!isResizing) return;
+    isResizing = false;
+    handle.classList.remove('resizing');
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+  });
+})();
+
 // ===== Clear jobs =====
 document.getElementById('clear-jobs-btn')?.addEventListener('click', async () => {
   allJobs = await window.api.clearJobs();
@@ -221,103 +260,271 @@ function addLog(entry) {
 }
 
 // ===== Template tree =====
+
+function buildLayoutFromInfo(info) {
+  const { packages, folders } = info;
+  return {
+    folders: (folders || []).map((name) => ({
+      name,
+      packages: packages.filter((p) => p.folder === name).map((p) => p.filePath.split('/').pop()),
+    })),
+    ungrouped: packages.filter((p) => !p.folder).map((p) => p.filePath.split('/').pop()),
+  };
+}
+
 function renderPackageTree(templateInfo) {
   const tree = document.getElementById('package-tree');
   const packages = templateInfo && templateInfo.packages;
+  const folders = (templateInfo && templateInfo.folders) || [];
 
   if (!packages || packages.length === 0) {
     tree.innerHTML = '<div class="empty-state" style="padding:20px; font-size:12px;">No packages loaded</div>';
     return;
   }
 
-  // Build a flat index of all graphics across all packages for selectComp
+  // Flat index for comp selection
   const allGraphics = [];
   packages.forEach((pkg) => allGraphics.push(...pkg.graphics));
 
-  const total = packages.length;
+  // Group by folder
+  const folderMap = {};
+  const ungrouped = [];
+  for (const pkg of packages) {
+    if (pkg.folder) { (folderMap[pkg.folder] = folderMap[pkg.folder] || []).push(pkg); }
+    else { ungrouped.push(pkg); }
+  }
 
-  tree.innerHTML = packages.map((pkg, pkgIdx) => {
+  let pkgIdx = 0;
+  function pkgRowHtml(pkg) {
+    const idx = pkgIdx++;
     const compsHtml = pkg.graphics.map((g) => {
-      const globalIdx = allGraphics.indexOf(g);
-      const active = selectedComp && selectedComp.globalIndex === globalIdx ? 'active' : '';
-      return `<div class="comp-item ${active}" data-global-index="${globalIdx}">${escapeHtml(g.button.name)}</div>`;
+      const gi = allGraphics.indexOf(g);
+      const active = selectedComp && selectedComp.globalIndex === gi ? 'active' : '';
+      return `<div class="comp-item ${active}" data-global-index="${gi}">${escapeHtml(g.button.name)}</div>`;
     }).join('');
-
     const liveBtn = pkg.isLive
       ? `<span class="pkg-live-badge" data-file-path="${escapeHtml(pkg.filePath)}" data-live="true">Live</span>`
       : `<button class="pkg-make-live-btn" data-file-path="${escapeHtml(pkg.filePath)}" data-live="false">Make live</button>`;
-
-    const upDisabled = pkgIdx === 0 ? 'disabled' : '';
-    const downDisabled = pkgIdx === total - 1 ? 'disabled' : '';
-
     return `
-      <div class="pkg-header" data-pkg="${pkgIdx}" data-file-path="${escapeHtml(pkg.filePath)}">
-        <svg class="pkg-chevron expanded" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
-        <span class="pkg-name">${escapeHtml(pkg.name)}</span>
-        ${liveBtn}
-        <div class="pkg-order-controls">
-          <button class="pkg-order-btn pkg-move-up" data-file-path="${escapeHtml(pkg.filePath)}" ${upDisabled} title="Move up">↑</button>
-          <button class="pkg-order-btn pkg-move-down" data-file-path="${escapeHtml(pkg.filePath)}" ${downDisabled} title="Move down">↓</button>
-          <button class="pkg-delete-btn" data-file-path="${escapeHtml(pkg.filePath)}" title="Remove package">×</button>
+      <div class="pkg-row" draggable="true" data-drag-type="package" data-file-path="${escapeHtml(pkg.filePath)}" data-folder="${escapeHtml(pkg.folder || '')}" data-pkg="${idx}">
+        <div class="pkg-header">
+          <span class="drag-handle" title="Drag to reorder">⠿</span>
+          <svg class="pkg-chevron expanded" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+          <span class="pkg-name">${escapeHtml(pkg.name)}</span>
+          ${liveBtn}
+          <button class="pkg-delete-btn" data-file-path="${escapeHtml(pkg.filePath)}" title="Archive package">×</button>
         </div>
-      </div>
-      <div class="comp-list" data-pkg="${pkgIdx}">${compsHtml}</div>
-    `;
-  }).join('');
+        <div class="comp-list" data-pkg="${idx}">${compsHtml}</div>
+      </div>`;
+  }
 
-  // Chevron collapse
+  let html = '';
+  for (const folderName of folders) {
+    const pkgs = folderMap[folderName] || [];
+    html += `
+      <div class="folder-group">
+        <div class="folder-row" draggable="true" data-drag-type="folder" data-folder-name="${escapeHtml(folderName)}">
+          <span class="drag-handle" title="Drag to reorder folders">⠿</span>
+          <svg class="folder-chevron expanded" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+          <svg class="folder-icon" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M10 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-8l-2-2z"/></svg>
+          <span class="folder-label">${escapeHtml(folderName)}</span>
+          <div class="folder-controls">
+            <button class="folder-rename-btn" data-folder="${escapeHtml(folderName)}" title="Rename">✎</button>
+            <button class="folder-delete-btn" data-folder="${escapeHtml(folderName)}" title="Delete folder">×</button>
+          </div>
+        </div>
+        <div class="folder-contents" data-drop-folder="${escapeHtml(folderName)}">
+          ${pkgs.map(pkgRowHtml).join('')}
+          ${pkgs.length === 0 ? '<div class="folder-empty-hint">Drop packages here</div>' : ''}
+        </div>
+      </div>`;
+  }
+  html += `<div class="ungrouped-section" data-drop-folder="">${ungrouped.map(pkgRowHtml).join('')}</div>`;
+  tree.innerHTML = html;
+
+  // ── Chevron: folders ──
+  tree.querySelectorAll('.folder-row').forEach((row) => {
+    row.addEventListener('click', (e) => {
+      if (e.target.closest('.folder-controls, .drag-handle')) return;
+      const chevron = row.querySelector('.folder-chevron');
+      const contents = row.closest('.folder-group').querySelector('.folder-contents');
+      chevron.classList.toggle('expanded');
+      if (contents) contents.style.display = chevron.classList.contains('expanded') ? '' : 'none';
+    });
+  });
+
+  // ── Chevron: packages ──
   tree.querySelectorAll('.pkg-header').forEach((hdr) => {
     hdr.addEventListener('click', (e) => {
-      if (e.target.closest('.pkg-live-badge, .pkg-make-live-btn, .pkg-order-controls')) return;
+      if (e.target.closest('.pkg-live-badge, .pkg-make-live-btn, .pkg-delete-btn, .drag-handle')) return;
+      const row = hdr.closest('.pkg-row');
       const chevron = hdr.querySelector('.pkg-chevron');
-      const compList = tree.querySelector(`.comp-list[data-pkg="${hdr.dataset.pkg}"]`);
+      const compList = row && row.querySelector('.comp-list');
       chevron.classList.toggle('expanded');
       if (compList) compList.style.display = chevron.classList.contains('expanded') ? '' : 'none';
     });
   });
 
-  // Live toggle
+  // ── Live toggle ──
   tree.querySelectorAll('.pkg-live-badge[data-live], .pkg-make-live-btn').forEach((btn) => {
     btn.addEventListener('click', async (e) => {
       e.stopPropagation();
-      const filePath = btn.dataset.filePath;
-      const isCurrentlyLive = btn.dataset.live === 'true';
-      const updated = await window.api.setPackageLive(filePath, !isCurrentlyLive);
+      const updated = await window.api.setPackageLive(btn.dataset.filePath, btn.dataset.live !== 'true');
       if (updated) renderPackageTree(updated);
     });
   });
 
-  // Move up / move down
-  tree.querySelectorAll('.pkg-move-up, .pkg-move-down').forEach((btn) => {
-    btn.addEventListener('click', async (e) => {
-      e.stopPropagation();
-      if (btn.disabled) return;
-      const direction = btn.classList.contains('pkg-move-up') ? 'up' : 'down';
-      const updated = await window.api.movePackage(btn.dataset.filePath, direction);
-      if (updated) renderPackageTree(updated);
-    });
-  });
-
-  // Delete package
+  // ── Archive package ──
   tree.querySelectorAll('.pkg-delete-btn').forEach((btn) => {
     btn.addEventListener('click', async (e) => {
       e.stopPropagation();
-      const filePath = btn.dataset.filePath;
-      const name = filePath.split('/').pop().replace('.aepx', '');
+      const name = btn.dataset.filePath.split('/').pop().replace('.aepx', '');
       if (!confirm(`Archive "${name}"?\n\nThe file will be moved to _PastBrandings in your watch folder.`)) return;
-      const updated = await window.api.removePackage(filePath);
+      const updated = await window.api.removePackage(btn.dataset.filePath);
       if (updated) renderPackageTree(updated);
     });
   });
 
-  // Comp selection
+  // ── Folder rename ──
+  tree.querySelectorAll('.folder-rename-btn').forEach((btn) => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const newName = prompt('Rename folder:', btn.dataset.folder);
+      if (!newName || newName === btn.dataset.folder) return;
+      const updated = await window.api.renameFolder(btn.dataset.folder, newName.trim());
+      if (updated) renderPackageTree(updated);
+    });
+  });
+
+  // ── Folder delete ──
+  tree.querySelectorAll('.folder-delete-btn').forEach((btn) => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      if (!confirm(`Delete folder "${btn.dataset.folder}"?\n\nPackages will move to the top level.`)) return;
+      const updated = await window.api.deleteFolder(btn.dataset.folder);
+      if (updated) renderPackageTree(updated);
+    });
+  });
+
+  // ── Comp selection ──
   tree.querySelectorAll('.comp-item').forEach((item) => {
     item.addEventListener('click', () => {
-      const globalIdx = parseInt(item.dataset.globalIndex);
-      selectComp(globalIdx, allGraphics[globalIdx]);
+      const gi = parseInt(item.dataset.globalIndex);
+      selectComp(gi, allGraphics[gi]);
       tree.querySelectorAll('.comp-item').forEach((c) => c.classList.remove('active'));
       item.classList.add('active');
     });
+  });
+
+  // ── Drag-and-drop ──
+  wireDragAndDrop(tree, templateInfo);
+}
+
+function wireDragAndDrop(tree, templateInfo) {
+  let dragging = null; // { type:'package'|'folder', id:filePath|folderName }
+
+  function clearHighlights() {
+    tree.querySelectorAll('.drop-before, .drop-after, .drop-into, .dragging').forEach((el) => {
+      el.classList.remove('drop-before', 'drop-after', 'drop-into', 'dragging');
+    });
+  }
+
+  tree.querySelectorAll('[data-drag-type]').forEach((el) => {
+    el.addEventListener('dragstart', (e) => {
+      const type = el.dataset.dragType;
+      const id = type === 'package' ? el.dataset.filePath : el.dataset.folderName;
+      dragging = { type, id };
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', id);
+      setTimeout(() => el.classList.add('dragging'), 0);
+    });
+    el.addEventListener('dragend', () => { clearHighlights(); dragging = null; });
+  });
+
+  tree.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    if (!dragging) return;
+    clearHighlights();
+
+    const pkgRow   = e.target.closest('.pkg-row');
+    const folderRow = e.target.closest('.folder-row');
+    const dropSection = e.target.closest('[data-drop-folder]');
+
+    if (dragging.type === 'package') {
+      if (pkgRow && pkgRow.dataset.filePath !== dragging.id) {
+        const mid = pkgRow.getBoundingClientRect().top + pkgRow.getBoundingClientRect().height / 2;
+        pkgRow.classList.add(e.clientY < mid ? 'drop-before' : 'drop-after');
+      } else if (folderRow && !pkgRow) {
+        folderRow.classList.add('drop-into');
+      } else if (dropSection && !pkgRow && !folderRow) {
+        dropSection.classList.add('drop-into');
+      }
+    } else if (dragging.type === 'folder') {
+      if (folderRow && folderRow.dataset.folderName !== dragging.id && !pkgRow) {
+        const mid = folderRow.getBoundingClientRect().top + folderRow.getBoundingClientRect().height / 2;
+        folderRow.classList.add(e.clientY < mid ? 'drop-before' : 'drop-after');
+      }
+    }
+  });
+
+  tree.addEventListener('dragleave', (e) => {
+    if (!tree.contains(e.relatedTarget)) clearHighlights();
+  });
+
+  tree.addEventListener('drop', async (e) => {
+    e.preventDefault();
+    if (!dragging) return;
+    const layout = buildLayoutFromInfo(templateInfo);
+    const pkgRow    = e.target.closest('.pkg-row');
+    const folderRow  = e.target.closest('.folder-row');
+    const dropSection = e.target.closest('[data-drop-folder]');
+    const dragBase   = dragging.id.split('/').pop();
+
+    if (dragging.type === 'package') {
+      // Remove from current location
+      layout.ungrouped = layout.ungrouped.filter((b) => b !== dragBase);
+      for (const f of layout.folders) f.packages = f.packages.filter((b) => b !== dragBase);
+
+      if (pkgRow && pkgRow.dataset.filePath !== dragging.id) {
+        const targetBase   = pkgRow.dataset.filePath.split('/').pop();
+        const targetFolder = pkgRow.dataset.folder;
+        const rect = pkgRow.getBoundingClientRect();
+        const before = e.clientY < rect.top + rect.height / 2;
+        if (targetFolder) {
+          const f = layout.folders.find((f) => f.name === targetFolder);
+          if (f) { const i = f.packages.indexOf(targetBase); f.packages.splice(before ? i : i + 1, 0, dragBase); }
+        } else {
+          const i = layout.ungrouped.indexOf(targetBase);
+          layout.ungrouped.splice(before ? i : i + 1, 0, dragBase);
+        }
+      } else if (folderRow && !pkgRow) {
+        const f = layout.folders.find((f) => f.name === folderRow.dataset.folderName);
+        if (f) f.packages.push(dragBase);
+      } else if (dropSection && !pkgRow && !folderRow) {
+        const targetFolder = dropSection.dataset.dropFolder;
+        if (targetFolder) {
+          const f = layout.folders.find((f) => f.name === targetFolder);
+          if (f) f.packages.push(dragBase);
+        } else {
+          layout.ungrouped.push(dragBase);
+        }
+      } else { clearHighlights(); dragging = null; return; }
+
+    } else if (dragging.type === 'folder') {
+      if (folderRow && folderRow.dataset.folderName !== dragging.id && !pkgRow) {
+        const dragFolder = layout.folders.find((f) => f.name === dragging.id);
+        if (dragFolder) {
+          layout.folders = layout.folders.filter((f) => f.name !== dragging.id);
+          const i = layout.folders.findIndex((f) => f.name === folderRow.dataset.folderName);
+          const rect = folderRow.getBoundingClientRect();
+          layout.folders.splice(e.clientY < rect.top + rect.height / 2 ? i : i + 1, 0, dragFolder);
+        }
+      } else { clearHighlights(); dragging = null; return; }
+    }
+
+    clearHighlights(); dragging = null;
+    const updated = await window.api.setLayout(layout);
+    if (updated) renderPackageTree(updated);
   });
 }
 

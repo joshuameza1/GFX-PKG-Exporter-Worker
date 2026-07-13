@@ -173,8 +173,28 @@ function registerIpcHandlers(ipcMain, services) {
     return templateParser.getCurrentInfo();
   });
 
-  ipcMain.handle('move-package', (_, { filePath, direction }) => {
-    templateParser.movePackage(filePath, direction);
+  ipcMain.handle('set-layout', (_, layout) => {
+    templateParser.setLayout(layout);
+    return templateParser.getCurrentInfo();
+  });
+
+  ipcMain.handle('create-folder', (_, name) => {
+    templateParser.createFolder(name);
+    return templateParser.getCurrentInfo();
+  });
+
+  ipcMain.handle('rename-folder', (_, { oldName, newName }) => {
+    templateParser.renameFolder(oldName, newName);
+    return templateParser.getCurrentInfo();
+  });
+
+  ipcMain.handle('delete-folder', (_, name) => {
+    templateParser.deleteFolder(name);
+    return templateParser.getCurrentInfo();
+  });
+
+  ipcMain.handle('set-package-folder', (_, { filePath, folderName }) => {
+    templateParser.setPackageFolder(filePath, folderName || null);
     return templateParser.getCurrentInfo();
   });
 
