@@ -1,9 +1,13 @@
-const { app, dialog } = require('electron');
-const { autoUpdater } = require('electron-updater');
+const { app, dialog, shell } = require('electron');
+
+const OWNER = 'joshuameza1';
+const REPO = 'GFX-PKG-Exporter-Worker';
+const RELEASES_API = `https://api.github.com/repos/${OWNER}/${REPO}/releases/latest`;
+const RELEASES_PAGE = `https://github.com/${OWNER}/${REPO}/releases/latest`;
 
 let logFn = console.log;
 let sendToRenderer = () => {};
-let updateReady = false;
+let latestUpdate = null;
 
 function getUpdateToken() {
   if (process.env.GH_TOKEN) return process.env.GH_TOKEN;
@@ -18,87 +22,61 @@ function getUpdateToken() {
 function setupAutoUpdater({ log, sendToRenderer: send }) {
   logFn = log || console.log;
   sendToRenderer = send || (() => {});
+}
 
-  autoUpdater.autoDownload = false;
-  autoUpdater.autoInstallOnAppQuit = true;
-
-  if (!app.isPackaged) return;
-
-  const token = getUpdateToken();
-  if (!token) {
-    logFn('No GitHub token configured — update checks disabled', 'warn');
-    sendToRenderer('update:status', {
-      status: 'error',
-      message: 'Update token not configured in this build',
+function parseVersion(version) {
+  return String(version || '')
+    .replace(/^v/i, '')
+    .split(/[.+-]/)
+    .map((part) => {
+      const n = parseInt(part, 10);
+      return Number.isFinite(n) ? n : 0;
     });
-    return;
+}
+
+function isNewerVersion(remote, local) {
+  const a = parseVersion(remote);
+  const b = parseVersion(local);
+  const len = Math.max(a.length, b.length);
+  for (let i = 0; i < len; i += 1) {
+    const left = a[i] || 0;
+    const right = b[i] || 0;
+    if (left > right) return true;
+    if (left < right) return false;
   }
+  return false;
+}
 
-  autoUpdater.setFeedURL({
-    provider: 'github',
-    owner: 'joshuameza1',
-    repo: 'GFX-PKG-Exporter-Worker',
-    private: true,
-    token,
-  });
+function pickDmgAsset(assets = []) {
+  const dmgs = assets.filter((asset) => /\.dmg$/i.test(asset.name || ''));
+  if (!dmgs.length) return null;
+  const universal = dmgs.find((asset) => /universal/i.test(asset.name));
+  return universal || dmgs[0];
+}
 
-  autoUpdater.on('checking-for-update', () => {
-    sendToRenderer('update:status', { status: 'checking' });
-    logFn('Checking for updates...');
-  });
+async function fetchLatestRelease() {
+  const token = getUpdateToken();
+  const headers = {
+    Accept: 'application/vnd.github+json',
+    'User-Agent': 'GFX-PKG-Exporter',
+  };
+  if (token) headers.Authorization = `Bearer ${token}`;
 
-  autoUpdater.on('update-available', (info) => {
-    updateReady = false;
-    sendToRenderer('update:status', {
-      status: 'available',
-      version: info.version,
-    });
-    logFn(`Update available: v${info.version}`);
-  });
-
-  autoUpdater.on('update-not-available', (info) => {
-    updateReady = false;
-    sendToRenderer('update:status', {
-      status: 'current',
-      version: info.version,
-    });
-    logFn('App is up to date');
-  });
-
-  autoUpdater.on('error', (err) => {
-    const raw = err.message || String(err);
-    let message = raw;
-    if (/not signed|code signature|code object is not signed/i.test(raw)) {
-      message =
-        'Auto-update requires a signed app. Download the latest .dmg from GitHub Releases and install it manually (right-click → Open).';
-    }
-    sendToRenderer('update:status', {
-      status: 'error',
-      message,
-    });
-    logFn(`Update error: ${message}`, 'error');
-  });
-
-  autoUpdater.on('download-progress', (progress) => {
-    sendToRenderer('update:status', {
-      status: 'downloading',
-      percent: Math.round(progress.percent || 0),
-    });
-  });
-
-  autoUpdater.on('update-downloaded', (info) => {
-    updateReady = true;
-    sendToRenderer('update:status', {
-      status: 'ready',
-      version: info.version,
-    });
-    logFn(`Update downloaded: v${info.version}. Restart to install.`);
-  });
+  const response = await fetch(RELEASES_API, { headers });
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`GitHub release check failed (${response.status}): ${body.slice(0, 180)}`);
+  }
+  return response.json();
 }
 
 async function checkForUpdates({ silent = false } = {}) {
+  sendToRenderer('update:status', { status: 'checking' });
+  logFn('Checking for updates...');
+
   if (!app.isPackaged) {
-    const message = 'Updates are only available in the installed app.';
+    const message = 'Update checks run in the installed app. Dev builds always use local code.';
+    sendToRenderer('update:status', { status: 'dev-mode', message });
     if (!silent) {
       await dialog.showMessageBox({
         type: 'info',
@@ -110,18 +88,55 @@ async function checkForUpdates({ silent = false } = {}) {
   }
 
   try {
-    const result = await Promise.race([
-      autoUpdater.checkForUpdates(),
+    const release = await Promise.race([
+      fetchLatestRelease(),
       new Promise((_, reject) => {
-        setTimeout(() => reject(new Error('Update check timed out')), 20000);
+        setTimeout(() => reject(new Error('Update check timed out')), 15000);
       }),
     ]);
-    return { status: 'checking', result };
+
+    const remoteVersion = String(release.tag_name || release.name || '').replace(/^v/i, '');
+    const localVersion = app.getVersion();
+    const dmg = pickDmgAsset(release.assets || []);
+    const releaseUrl = release.html_url || RELEASES_PAGE;
+    const downloadUrl = dmg?.browser_download_url || releaseUrl;
+
+    if (!remoteVersion) {
+      throw new Error('Could not read latest release version');
+    }
+
+    if (isNewerVersion(remoteVersion, localVersion)) {
+      latestUpdate = {
+        version: remoteVersion,
+        releaseUrl,
+        downloadUrl,
+        dmgName: dmg?.name || null,
+      };
+      sendToRenderer('update:status', {
+        status: 'available',
+        version: remoteVersion,
+        releaseUrl,
+        downloadUrl,
+        dmgName: dmg?.name || null,
+      });
+      logFn(`Update available: v${remoteVersion}`);
+      return { status: 'available', ...latestUpdate };
+    }
+
+    latestUpdate = null;
+    sendToRenderer('update:status', {
+      status: 'current',
+      version: localVersion,
+    });
+    logFn('App is up to date');
+    return { status: 'current', version: localVersion };
   } catch (err) {
+    latestUpdate = null;
     sendToRenderer('update:status', {
       status: 'error',
       message: err.message,
     });
+    logFn(`Update error: ${err.message}`, 'error');
     if (!silent) {
       await dialog.showMessageBox({
         type: 'error',
@@ -133,26 +148,23 @@ async function checkForUpdates({ silent = false } = {}) {
   }
 }
 
-async function downloadUpdate() {
-  if (!app.isPackaged) return { status: 'dev-mode' };
-  await autoUpdater.downloadUpdate();
-  return { status: 'downloading' };
+async function openLatestDownload() {
+  const target = latestUpdate?.downloadUrl || latestUpdate?.releaseUrl || RELEASES_PAGE;
+  await shell.openExternal(target);
+  return { status: 'opened', url: target };
 }
 
-function installUpdate() {
-  if (!updateReady) return { status: 'not-ready' };
-  autoUpdater.quitAndInstall();
-  return { status: 'installing' };
-}
-
-function isUpdateReady() {
-  return updateReady;
+function getLatestUpdate() {
+  return latestUpdate;
 }
 
 module.exports = {
   setupAutoUpdater,
   checkForUpdates,
-  downloadUpdate,
-  installUpdate,
-  isUpdateReady,
+  openLatestDownload,
+  getLatestUpdate,
+  // Keep old names as no-ops so older IPC wiring doesn't crash mid-deploy
+  downloadUpdate: openLatestDownload,
+  installUpdate: async () => ({ status: 'manual' }),
+  isUpdateReady: () => Boolean(latestUpdate),
 };

@@ -53,9 +53,8 @@ contextBridge.exposeInMainWorld('api', {
     return () => ipcRenderer.removeAllListeners('config:updated');
   },
   checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),
-  downloadUpdate: () => ipcRenderer.invoke('download-update'),
-  installUpdate: () => ipcRenderer.invoke('install-update'),
-  getUpdateReady: () => ipcRenderer.invoke('get-update-ready'),
+  openLatestDownload: () => ipcRenderer.invoke('open-latest-download'),
+  getLatestUpdate: () => ipcRenderer.invoke('get-latest-update'),
   onTestRenderComplete: (cb) => {
     ipcRenderer.on('test-render:complete', (_, result) => cb(result));
     return () => ipcRenderer.removeAllListeners('test-render:complete');

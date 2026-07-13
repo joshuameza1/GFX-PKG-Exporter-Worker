@@ -6,9 +6,8 @@ const { execFile } = require('child_process');
 const { getEnvPath } = require('./env-loader');
 const {
   checkForUpdates,
-  downloadUpdate,
-  installUpdate,
-  isUpdateReady,
+  openLatestDownload,
+  getLatestUpdate,
 } = require('./updater');
 const {
   needsSetup,
@@ -74,9 +73,8 @@ function registerIpcHandlers(ipcMain, services) {
   });
 
   ipcMain.handle('check-for-updates', () => checkForUpdates({ silent: false }));
-  ipcMain.handle('download-update', () => downloadUpdate());
-  ipcMain.handle('install-update', () => installUpdate());
-  ipcMain.handle('get-update-ready', () => isUpdateReady());
+  ipcMain.handle('open-latest-download', () => openLatestDownload());
+  ipcMain.handle('get-latest-update', () => getLatestUpdate());
 
   ipcMain.handle('test-render', async (event, data) => {
     const { graphic, fields } = data;

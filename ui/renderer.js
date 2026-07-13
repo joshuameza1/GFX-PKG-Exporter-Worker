@@ -784,53 +784,50 @@ function updateServerStatus(status) {
 }
 
 // ===== App updates =====
-let pendingUpdateVersion = null;
+let pendingUpdate = null;
 
 function setUpdateUi(state) {
   const statusText = document.getElementById('update-status-text');
   const checkBtn = document.getElementById('check-update-btn');
-  const downloadBtn = document.getElementById('download-update-btn');
-  const installBtn = document.getElementById('install-update-btn');
-  const progressWrap = document.getElementById('update-progress');
-  const progressFill = document.getElementById('update-progress-fill');
-  const progressLabel = document.getElementById('update-progress-label');
+  const openBtn = document.getElementById('open-download-btn');
+  const hint = document.getElementById('update-download-hint');
 
   if (!statusText) return;
 
-  checkBtn.disabled = false;
-  downloadBtn.style.display = 'none';
-  installBtn.style.display = 'none';
-  progressWrap.style.display = 'none';
+  if (checkBtn) checkBtn.disabled = false;
+  if (openBtn) openBtn.style.display = 'none';
+  if (hint) {
+    hint.style.display = 'none';
+    hint.textContent = '';
+  }
 
   switch (state.status) {
     case 'checking':
       statusText.textContent = 'Checking for updates...';
-      checkBtn.disabled = true;
+      if (checkBtn) checkBtn.disabled = true;
       break;
     case 'available':
-      pendingUpdateVersion = state.version;
+      pendingUpdate = state;
       statusText.textContent = `v${state.version} available`;
-      downloadBtn.style.display = 'inline-block';
-      break;
-    case 'downloading':
-      statusText.textContent = `Downloading v${pendingUpdateVersion || ''}`.trim();
-      progressWrap.style.display = 'flex';
-      progressFill.style.width = `${state.percent || 0}%`;
-      progressLabel.textContent = `${state.percent || 0}%`;
-      checkBtn.disabled = true;
-      break;
-    case 'ready':
-      statusText.textContent = `v${state.version || pendingUpdateVersion} ready to install`;
-      installBtn.style.display = 'inline-block';
+      if (openBtn) openBtn.style.display = 'inline-block';
+      if (hint) {
+        hint.style.display = 'block';
+        hint.textContent = state.dmgName
+          ? `Download ${state.dmgName}, replace the app in Applications, then right-click → Open.`
+          : 'Open the release page, download the .dmg, replace the app in Applications, then right-click → Open.';
+      }
       break;
     case 'current':
+      pendingUpdate = null;
       statusText.textContent = 'Up to date';
       break;
     case 'error':
+      pendingUpdate = null;
       statusText.textContent = state.message || 'Update check failed';
       break;
     case 'dev-mode':
-      statusText.textContent = 'Dev mode — updates disabled';
+      pendingUpdate = null;
+      statusText.textContent = 'Dev mode — update checks use the installed app';
       break;
     default:
       statusText.textContent = 'Ready';
@@ -839,16 +836,15 @@ function setUpdateUi(state) {
 
 document.getElementById('check-update-btn')?.addEventListener('click', async () => {
   setUpdateUi({ status: 'checking' });
-  await window.api.checkForUpdates();
+  try {
+    await window.api.checkForUpdates();
+  } catch (err) {
+    setUpdateUi({ status: 'error', message: err.message || 'Update check failed' });
+  }
 });
 
-document.getElementById('download-update-btn')?.addEventListener('click', async () => {
-  setUpdateUi({ status: 'downloading', percent: 0 });
-  await window.api.downloadUpdate();
-});
-
-document.getElementById('install-update-btn')?.addEventListener('click', async () => {
-  await window.api.installUpdate();
+document.getElementById('open-download-btn')?.addEventListener('click', async () => {
+  await window.api.openLatestDownload();
 });
 
 window.api.onUpdateStatus((state) => {
