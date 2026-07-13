@@ -13,6 +13,21 @@ function getSettingsPath() {
   return path.join(app.getPath('userData'), 'settings.json');
 }
 
+function getDefaultAppDirs() {
+  const root = path.join(app.getPath('documents'), 'GFXPKGExporter');
+  return {
+    root,
+    packages: path.join(root, 'Packages'),
+    renders: path.join(root, 'Renders'),
+    work: path.join(root, 'Work'),
+  };
+}
+
+function ensureDir(dirPath) {
+  if (!dirPath) return;
+  fs.mkdirSync(dirPath, { recursive: true });
+}
+
 function isPlaceholderPath(value) {
   const v = (value || '').trim().toLowerCase();
   if (!v) return true;
@@ -63,28 +78,58 @@ function isValidServerUrl(url) {
 }
 
 function buildDefaultsFromEnv() {
+  const dirs = getDefaultAppDirs();
   return {
     setupComplete: false,
     socketIoUrl: normalizeUrl(process.env.SOCKET_IO_URL),
-    watchFolder: cleanPath(process.env.WATCH_FOLDER),
-    renderFolder: cleanPath(process.env.RENDER_FOLDER),
+    watchFolder: cleanPath(process.env.WATCH_FOLDER) || dirs.packages,
+    renderFolder: cleanPath(process.env.RENDER_FOLDER) || dirs.renders,
     cdnUrl: cleanPath(process.env.CDN_URL) || '',
     aerenderPath: cleanPath(process.env.AERENDER_PATH) || '',
   };
 }
 
+function withDefaultFolders(settings) {
+  const dirs = getDefaultAppDirs();
+  const next = {
+    ...settings,
+    watchFolder: cleanPath(settings.watchFolder) || dirs.packages,
+    renderFolder: cleanPath(settings.renderFolder) || dirs.renders,
+  };
+  ensureDir(dirs.root);
+  ensureDir(next.watchFolder);
+  ensureDir(next.renderFolder);
+  ensureDir(dirs.work);
+  return { settings: next, dirs };
+}
+
 function loadSettings() {
   const defaults = buildDefaultsFromEnv();
   const stored = readSettingsFile();
-  if (!stored) return defaults;
-  return {
-    ...defaults,
-    ...stored,
-    socketIoUrl: normalizeUrl(stored.socketIoUrl || defaults.socketIoUrl),
-    watchFolder: cleanPath(stored.watchFolder ?? defaults.watchFolder),
-    renderFolder: cleanPath(stored.renderFolder ?? defaults.renderFolder),
-    cdnUrl: cleanPath(stored.cdnUrl ?? defaults.cdnUrl) || (stored.cdnUrl || ''),
-  };
+  const merged = stored
+    ? {
+      ...defaults,
+      ...stored,
+      socketIoUrl: normalizeUrl(stored.socketIoUrl || defaults.socketIoUrl),
+      watchFolder: cleanPath(stored.watchFolder ?? defaults.watchFolder),
+      renderFolder: cleanPath(stored.renderFolder ?? defaults.renderFolder),
+      cdnUrl: cleanPath(stored.cdnUrl ?? defaults.cdnUrl) || (stored.cdnUrl || ''),
+    }
+    : defaults;
+
+  const { settings, dirs } = withDefaultFolders(merged);
+
+  // Persist defaults for fresh installs so Settings shows real paths.
+  if (!stored || !stored.watchFolder || !stored.renderFolder) {
+    writeSettingsFile({
+      ...settings,
+      // Don't mark setup complete just because folders exist.
+      setupComplete: Boolean(stored?.setupComplete),
+    });
+  }
+
+  settings._dirs = dirs;
+  return settings;
 }
 
 function needsSetup(settings) {
@@ -94,11 +139,13 @@ function needsSetup(settings) {
 }
 
 function applySettingsToConfig(config, settings) {
-  config.socketIoUrl = normalizeUrl(settings.socketIoUrl);
-  config.watchFolder = cleanPath(settings.watchFolder);
-  config.renderFolder = cleanPath(settings.renderFolder);
-  config.cdnUrl = settings.cdnUrl || '';
-  const preferred = cleanPath(settings.aerenderPath) || cleanPath(config.aerenderPath);
+  const { settings: normalized, dirs } = withDefaultFolders(settings);
+  config.socketIoUrl = normalizeUrl(normalized.socketIoUrl);
+  config.watchFolder = normalized.watchFolder;
+  config.renderFolder = normalized.renderFolder;
+  config.cdnUrl = normalized.cdnUrl || '';
+  config.nexrenderWorkpath = dirs.work;
+  const preferred = cleanPath(normalized.aerenderPath) || cleanPath(config.aerenderPath);
   config.aerenderPath = resolveAerenderPath(preferred) || preferred || '';
   return config;
 }
@@ -120,12 +167,15 @@ function saveSettings(partial) {
     cdnUrl: partial.cdnUrl !== undefined ? partial.cdnUrl.trim() : current.cdnUrl,
     setupComplete: true,
   };
-  writeSettingsFile(next);
-  return next;
+  delete next._dirs;
+  const { settings } = withDefaultFolders(next);
+  writeSettingsFile(settings);
+  return settings;
 }
 
 module.exports = {
   getSettingsPath,
+  getDefaultAppDirs,
   loadSettings,
   saveSettings,
   needsSetup,

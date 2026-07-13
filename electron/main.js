@@ -22,6 +22,7 @@ const { TemplateWatcher } = require('../src/templates/template-watcher');
 const { TemplateParser } = require('../src/templates/template-parser');
 const { registerIpcHandlers } = require('./ipc-handlers');
 const { setupAutoUpdater, checkForUpdates } = require('./updater');
+const { appendLog, getLogFilePath, getLogsDir } = require('./logger');
 
 const settings = loadSettings();
 applySettingsToConfig(config, settings);
@@ -40,6 +41,7 @@ function sendToRenderer(channel, data) {
 function log(message, level = 'info') {
   const entry = { timestamp: new Date().toISOString(), message, level };
   console.log(`[${level}] ${message}`);
+  appendLog(level, message);
   sendToRenderer('log', entry);
 }
 
@@ -68,8 +70,10 @@ function restartWatcher() {
 
 function markCrash(err) {
   try {
+    const detail = err && (err.stack || err.message || String(err));
     const flag = path.join(app.getPath('userData'), '.last-crash');
-    fs.writeFileSync(flag, `${new Date().toISOString()}\n${err && (err.stack || err.message || String(err))}\n`);
+    fs.writeFileSync(flag, `${new Date().toISOString()}\n${detail}\n`);
+    appendLog('error', `CRASH: ${detail}`);
   } catch (_) {
     // ignore
   }
@@ -112,7 +116,7 @@ app.whenReady().then(() => {
 
   if (jobStore) {
     try {
-      processor = new JobProcessor(jobStore, config);
+      processor = new JobProcessor(jobStore, config, log);
       eventRouter = new EventRouter(socketClient, jobStore, processor);
     } catch (err) {
       initError = initError || err;
@@ -293,6 +297,10 @@ app.whenReady().then(() => {
     }, 2500);
   }
   log('GFX PKG Exporter started');
+  log(`Watch folder: ${config.watchFolder || '(none)'}`);
+  log(`Render folder: ${config.renderFolder || '(none)'}`);
+  log(`aerender: ${config.aerenderPath || '(none)'}`);
+  log(`Log file: ${getLogFilePath()}`);
 }).catch((err) => {
   console.error('[fatal] App failed to start:', err);
   dialog.showErrorBox('GFX PKG Exporter failed to start', err.message || String(err));

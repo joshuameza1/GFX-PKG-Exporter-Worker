@@ -53,6 +53,9 @@ contextBridge.exposeInMainWorld('api', {
     return () => ipcRenderer.removeAllListeners('config:updated');
   },
   checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),
+  openLogsFolder: () => ipcRenderer.invoke('open-logs-folder'),
+  getLogPath: () => ipcRenderer.invoke('get-log-path'),
+  getRecentLogs: () => ipcRenderer.invoke('get-recent-logs'),
   openLatestDownload: () => ipcRenderer.invoke('open-latest-download'),
   getLatestUpdate: () => ipcRenderer.invoke('get-latest-update'),
   onTestRenderComplete: (cb) => {

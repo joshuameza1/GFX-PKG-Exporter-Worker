@@ -3,11 +3,12 @@ const { NexrenderRunner } = require('../render/nexrender-runner');
 const { buildNexrenderConfigs } = require('../render/job-builder');
 
 class JobProcessor extends EventEmitter {
-  constructor(jobStore, config) {
+  constructor(jobStore, config, log = console.log) {
     super();
     this.jobStore = jobStore;
     this.config = config;
-    this.runner = new NexrenderRunner(config);
+    this.log = typeof log === 'function' ? log : console.log;
+    this.runner = new NexrenderRunner(config, this.log);
     this.running = false;
     this.processing = false;
   }
@@ -48,7 +49,9 @@ class JobProcessor extends EventEmitter {
   async _processJob(job) {
     const { id, request } = job;
     try {
-      const { requestKey, configs } = buildNexrenderConfigs(request, this.config);
+      this.log(`Processing job ${id} — ${request.type} (${request.gfxpkg})`);
+      const { requestKey, configs, templatePath } = buildNexrenderConfigs(request, this.config);
+      this.log(`Template: ${templatePath} — ${configs.length} render pass(es)`);
 
       for (const nexrenderConfig of configs) {
         await this.runner.renderJob(nexrenderConfig, {
@@ -69,6 +72,7 @@ class JobProcessor extends EventEmitter {
       this.emit('job:completed', { id, request, filename, fileLink, localPath });
     } catch (err) {
       const errorMessage = err.message || String(err);
+      this.log(`Job ${id} failed: ${errorMessage}`, 'error');
       this.jobStore.markFailed(id, errorMessage);
       this.emit('job:failed', { id, request, errorMessage });
     }

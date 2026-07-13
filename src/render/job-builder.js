@@ -1,5 +1,6 @@
-const path = require('path');
 const fs = require('fs');
+const path = require('path');
+const { pathToFileURL } = require('url');
 const archiver = require('archiver');
 
 const METADATA_KEYS = new Set([
@@ -23,6 +24,16 @@ function extractTemplateFields(request) {
 }
 
 function buildNexrenderConfigs(request, config) {
+  if (!config.renderFolder) {
+    throw new Error('Render folder is not set. Open Settings and save a render path.');
+  }
+  if (!config.watchFolder) {
+    throw new Error('Watch folder is not set. Open Settings and save a packages path.');
+  }
+  if (!config.aerenderPath || !fs.existsSync(config.aerenderPath)) {
+    throw new Error('aerender was not found. Install After Effects or set AERENDER_PATH.');
+  }
+
   const requestKey = `${request.gfxpkg}_${request.type.replace(/\s+/g, '_')}_${request.request_id}`;
   const outputDir = path.join(config.renderFolder, requestKey);
 
@@ -36,7 +47,11 @@ function buildNexrenderConfigs(request, config) {
       `Expected Watch/<name>/<name>.aepx (Collect Files) or Watch/<name>.aepx (legacy).`
     );
   }
-  const templateProject = { path: templatePath };
+  if (!fs.existsSync(templatePath)) {
+    throw new Error(`Template file missing: ${templatePath}`);
+  }
+
+  const templateSrc = pathToFileURL(templatePath).href;
   const assets = extractTemplateFields(request);
 
   const input = request.outputModule.includes('ProRes') ? 'result.mov' : 'result_00000.jpg';
@@ -44,13 +59,18 @@ function buildNexrenderConfigs(request, config) {
     ? 'ProRes422'
     : request.outputModule;
 
-  const configs = request.final_frames.map((frame, i) => {
+  const frames = Array.isArray(request.final_frames) ? request.final_frames : [];
+  if (!frames.length) {
+    throw new Error(`No final_frames configured for "${request.type}"`);
+  }
+
+  const configs = frames.map((frame, i) => {
     const jobName = `${request.gfxpkg}${frame.suffix}_${i + 1}`;
     const outputFile = path.join(outputDir, `${jobName}.${request.outputExt}`);
 
     const nexrenderConfig = {
       template: {
-        src: `file:///${templateProject.path}`,
+        src: templateSrc,
         composition: `^${request.type.split(' ').join('_')}`,
         outputModule,
         frameStart: frame.start_frame,
@@ -74,7 +94,7 @@ function buildNexrenderConfigs(request, config) {
     return nexrenderConfig;
   });
 
-  return { requestKey, configs };
+  return { requestKey, configs, templatePath, templateSrc };
 }
 
 async function zipRenderFiles(renderFolder, requestKey) {

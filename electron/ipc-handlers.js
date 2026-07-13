@@ -15,6 +15,7 @@ const {
   getSettingsPath,
 } = require('./settings-store');
 const { resolveAerenderPath } = require('./ae-paths');
+const { getLogFilePath, getLogsDir, readRecentLogs } = require('./logger');
 
 function registerIpcHandlers(ipcMain, services) {
   const {
@@ -50,6 +51,8 @@ function registerIpcHandlers(ipcMain, services) {
       hostname: os.hostname(),
       appVersion: app.getVersion(),
       aerenderPath: config.aerenderPath || null,
+      logPath: getLogFilePath(),
+      packagesDefault: require('./settings-store').getDefaultAppDirs().packages,
       envPath: getEnvPath(),
       settingsPath: getSettingsPath(),
       isPackaged: app.isPackaged,
@@ -75,6 +78,14 @@ function registerIpcHandlers(ipcMain, services) {
   });
 
   ipcMain.handle('check-for-updates', () => checkForUpdates({ silent: false }));
+  ipcMain.handle('get-log-path', () => getLogFilePath());
+  ipcMain.handle('get-recent-logs', () => readRecentLogs());
+  ipcMain.handle('open-logs-folder', async () => {
+    const dir = getLogsDir();
+    fs.mkdirSync(dir, { recursive: true });
+    await shell.openPath(dir);
+    return { path: dir, logFile: getLogFilePath() };
+  });
   ipcMain.handle('open-latest-download', () => openLatestDownload());
   ipcMain.handle('get-latest-update', () => getLatestUpdate());
 

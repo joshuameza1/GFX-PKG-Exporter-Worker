@@ -997,6 +997,9 @@ function applyConfigToUi(config) {
   if (networkUrl) networkUrl.textContent = config.socketIoUrl || '';
 
   document.getElementById('app-version').textContent = config.appVersion ? `v${config.appVersion}` : '—';
+  const logHint = document.getElementById('log-path-hint');
+  if (logHint && config.logPath) logHint.textContent = config.logPath;
+
   if (!config.isPackaged) {
     setUpdateUi({ status: 'dev-mode' });
   }
@@ -1141,3 +1144,15 @@ document.addEventListener('click', async (e) => {
 });
 
 init();
+
+
+document.getElementById('open-logs-btn')?.addEventListener('click', async () => {
+  try {
+    const info = await window.api.openLogsFolder();
+    const hint = document.getElementById('log-path-hint');
+    if (hint && info?.logFile) hint.textContent = info.logFile;
+  } catch (err) {
+    const hint = document.getElementById('log-path-hint');
+    if (hint) hint.textContent = err.message || 'Could not open logs folder';
+  }
+});

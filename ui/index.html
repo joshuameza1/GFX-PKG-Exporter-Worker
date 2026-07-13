@@ -180,12 +180,12 @@
         <div class="settings-form-card">
           <label class="settings-field">
             <span class="settings-field-label">Watch folder</span>
-            <input type="text" id="setting-watch-folder" class="settings-input" placeholder="/path/to/packages">
+            <input type="text" id="setting-watch-folder" class="settings-input" placeholder="~/Documents/GFXPKGExporter/Packages">
           </label>
           <p class="settings-hint">Folder of Collect Files packages (subfolders with .aepx) or legacy flat .aepx files.</p>
           <label class="settings-field">
             <span class="settings-field-label">Render folder</span>
-            <input type="text" id="setting-render-folder" class="settings-input" placeholder="/path/to/renders">
+            <input type="text" id="setting-render-folder" class="settings-input" placeholder="~/Documents/GFXPKGExporter/Renders">
           </label>
           <label class="settings-field">
             <span class="settings-field-label">CDN URL</span>
@@ -215,7 +215,9 @@
           <div class="update-actions">
             <button class="secondary-btn" id="check-update-btn">Check for updates</button>
             <button class="primary-btn" id="open-download-btn" style="display:none">Open download page</button>
+            <button class="secondary-btn" id="open-logs-btn">Open logs</button>
           </div>
+          <p class="settings-hint" id="log-path-hint" style="margin-top:10px;"></p>
           <p class="settings-hint" id="update-download-hint" style="display:none;margin-top:10px;"></p>
         </div>
       </div>
