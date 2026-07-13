@@ -54,10 +54,19 @@ function pickDmgAsset(assets = []) {
   // Match this machine's CPU. Prefer arch-specific builds over a "universal"
   // DMG that may still ship arm64-only native modules.
   const arch = process.arch; // arm64 | x64
-  const archMatch = dmgs.find((asset) => new RegExp(`(^|[-_.])${arch}([-_.]|$)`, 'i').test(asset.name));
+  const archAliases = arch === 'x64' ? ['x64', 'x86_64', 'amd64', 'intel'] : [arch];
+  const archMatch = dmgs.find((asset) =>
+    archAliases.some((alias) => new RegExp(`(^|[-_.])${alias}([-_.]|$)`, 'i').test(asset.name || ''))
+  );
   if (archMatch) return archMatch;
 
-  const universal = dmgs.find((asset) => /universal/i.test(asset.name));
+  // electron-builder often omits "x64" from Intel artifact names.
+  if (arch === 'x64') {
+    const unlabeled = dmgs.find((asset) => !/arm64|aarch64|universal/i.test(asset.name || ''));
+    if (unlabeled) return unlabeled;
+  }
+
+  const universal = dmgs.find((asset) => /universal/i.test(asset.name || ''));
   return universal || dmgs[0];
 }
 
