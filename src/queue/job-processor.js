@@ -22,7 +22,7 @@ const PHASE_LABELS = {
   'render:postdownload': 'Preparing assets…',
   'render:prerender': 'Preparing…',
   'render:script': 'Preparing script…',
-  'render:dorender': 'Waiting on After Effects (keep AE open for speed)…',
+  'render:dorender': 'Rendering via open After Effects…',
   'render:postrender': 'Copying to render folder…',
   'render:cleanup': 'Finishing…',
 };
@@ -132,9 +132,9 @@ class JobProcessor extends EventEmitter {
                 const synthetic = 25 + Math.min(50, elapsed * 0.85);
                 setProgress(
                   synthetic,
-                  elapsed < 8
-                    ? 'Opening After Effects…'
-                    : 'Waiting on After Effects (keep AE open for speed)…'
+                  elapsed < 5
+                    ? 'Connecting to After Effects…'
+                    : 'Rendering via open After Effects…'
                 );
               }, 400);
             } else if (state === 'render:postrender' || state === 'render:cleanup') {

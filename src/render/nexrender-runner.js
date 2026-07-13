@@ -11,19 +11,19 @@ class NexrenderRunner {
     this.config = config;
     this.log = typeof log === 'function' ? log : console.log;
     this.settings = null;
-    this._aeWarmPromise = null;
+    this._aeReady = null;
   }
 
   async ensureAeWarm() {
-    if (!this._aeWarmPromise) {
-      this._aeWarmPromise = ensureAfterEffectsRunning(this.config.aerenderPath, this.log)
-        .catch((err) => {
-          this.log(`AE keepalive failed: ${err.message}`, 'warn');
-          this._aeWarmPromise = null;
-          return null;
-        });
+    if (this._aeReady?.ready) return this._aeReady;
+    try {
+      const result = await ensureAfterEffectsRunning(this.config.aerenderPath, this.log);
+      if (result?.ready) this._aeReady = result;
+      return result;
+    } catch (err) {
+      this.log(`AE keepalive failed: ${err.message}`, 'warn');
+      return null;
     }
-    return this._aeWarmPromise;
   }
 
   _ensureInit() {
@@ -48,13 +48,13 @@ class NexrenderRunner {
     process.env.NEXRENDER_ENABLE_AELOG_PROJECT_FOLDER = 'true';
 
     const self = this;
-    // NOTE: do NOT set reuse/aerender -reuse — AE 2026 rejects that flag.
-    // Speed comes from keeping After Effects.app open instead.
     this.settings = withBlockedProcessExit(() => nexrender.init({
       workpath: this.config.nexrenderWorkpath,
       binary: this.config.aerenderPath,
       skipCleanup: true,
       stopOnError: true,
+      // Reuse the open AE UI instance (supported by AE 2026; must wait until AE accepts Apple Events).
+      reuse: true,
       debug: true,
       verbose: true,
       actions: {
@@ -69,7 +69,10 @@ class NexrenderRunner {
 
   async renderJob(nexrenderConfig, { onProgress, onStateChange, onError } = {}) {
     this._ensureInit();
-    await this.ensureAeWarm();
+    const warm = await this.ensureAeWarm();
+    if (warm && warm.ready === false) {
+      this.log('AE was not Apple Event ready — -reuse may fall back to a slow launch', 'warn');
+    }
 
     const templateSrc = nexrenderConfig?.template?.src;
     const composition = nexrenderConfig?.template?.composition;
