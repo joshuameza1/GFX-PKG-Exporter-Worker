@@ -27,9 +27,6 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
 
-      - name: Ensure ae folder exists for packaging
-        run: mkdir -p ae
-
       - name: Build and publish arm64
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
@@ -53,37 +50,38 @@ jobs:
             dist/latest-mac.yml
 
   release-x64:
-    runs-on: macos-13
+    # Build under Rosetta on Apple Silicon runners — macos-13 Intel queues are too slow/unreliable.
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Ensure Rosetta is available
+        run: softwareupdate --install-rosetta --agree-to-license || true
 
       - uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: npm
 
-      - name: Install dependencies
-        run: npm ci
+      - name: Install dependencies (x64)
+        run: arch -x86_64 bash -lc 'npm ci'
 
       - name: Write update token for installed apps
         run: node -e "require('fs').writeFileSync('electron/github-token.js', 'module.exports = ' + JSON.stringify(process.env.GH_TOKEN) + ';')"
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
 
-      - name: Ensure ae folder exists for packaging
-        run: mkdir -p ae
-
-      - name: Build and publish x64
+      - name: Build and publish x64 under Rosetta
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
-        run: npx electron-builder --mac --x64 --publish always
+        run: arch -x86_64 bash -lc 'npx electron-builder --mac --x64 --publish always'
 
       - name: Verify better-sqlite3 is x64
         run: |
           NODE="$(find dist -path '*/better_sqlite3.node' | head -1)"
           echo "native module: $NODE"
           lipo -info "$NODE" | tee /tmp/lipo.txt
-          grep -E -q 'x86_64|x64' /tmp/lipo.txt
+          grep -E -q 'x86_64' /tmp/lipo.txt
           ! grep -q 'arm64' /tmp/lipo.txt
 
       - name: Upload build artifacts

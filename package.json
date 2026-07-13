@@ -34,20 +34,8 @@
     "productName": "GFX PKG Exporter",
     "mac": {
       "target": [
-        {
-          "target": "dmg",
-          "arch": [
-            "arm64",
-            "x64"
-          ]
-        },
-        {
-          "target": "zip",
-          "arch": [
-            "arm64",
-            "x64"
-          ]
-        }
+        "dmg",
+        "zip"
       ],
       "category": "public.app-category.graphics-design",
       "identity": "-",
@@ -73,13 +61,6 @@
       {
         "from": ".env.example",
         "to": ".env.example"
-      },
-      {
-        "from": "ae/",
-        "to": "ae/",
-        "filter": [
-          "**/*"
-        ]
       }
     ],
     "asar": true,
