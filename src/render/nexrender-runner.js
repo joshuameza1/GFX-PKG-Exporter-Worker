@@ -30,12 +30,17 @@ class NexrenderRunner {
     this.log(
       `Init nexrender — binary=${this.config.aerenderPath} workpath=${this.config.nexrenderWorkpath}`
     );
+    // Put aerender logs next to the job work folder (and quiet the deprecation spam).
+    process.env.NEXRENDER_ENABLE_AELOG_PROJECT_FOLDER = 'true';
+
     const self = this;
     this.settings = withBlockedProcessExit(() => nexrender.init({
       workpath: this.config.nexrenderWorkpath,
       binary: this.config.aerenderPath,
       skipCleanup: true,
       stopOnError: true,
+      // Reuse a running AE instance so later jobs skip the ~45s cold launch.
+      reuse: true,
       debug: true,
       verbose: true,
       logger: {

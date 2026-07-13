@@ -609,7 +609,7 @@ function renderCompDetail() {
       <div class="render-progress">
         <div class="spinner"></div>
         <div class="render-progress-text">
-          <div class="render-progress-label">Rendering...</div>
+          <div class="render-progress-label">${escapeHtml(testRenderState.label || 'Rendering…')}</div>
           <div class="render-progress-detail">${testRenderState.percent || 0}%</div>
         </div>
         <div style="width:100%">
@@ -722,7 +722,7 @@ async function handleTestRender() {
     fields[cb.dataset.field] = cb.checked ? 1 : 0;
   });
 
-  testRenderState = { status: 'rendering', percent: 0 };
+  testRenderState = { status: 'rendering', percent: 0, label: 'Starting…' };
   renderCompDetail();
 
   try {
@@ -864,15 +864,18 @@ window.api.onJobProgress((data) => {
     const fill = card.querySelector('.progress-fill');
     if (fill) fill.style.width = `${data.percent}%`;
     const meta = card.querySelector('.job-meta span:last-child');
-    if (meta) meta.textContent = `${data.percent}%`;
+    if (meta) meta.textContent = data.label ? `${data.percent}% · ${data.label}` : `${data.percent}%`;
   }
 
   if (testRenderState && testRenderState.status === 'rendering') {
     testRenderState.percent = data.percent;
+    if (data.label) testRenderState.label = data.label;
     const spinner = document.querySelector('.render-progress');
     if (spinner) {
       const pct = spinner.querySelector('.render-progress-detail');
       if (pct) pct.textContent = `${data.percent}%`;
+      const label = spinner.querySelector('.render-progress-label');
+      if (label && data.label) label.textContent = data.label;
       const fill = spinner.querySelector('.progress-fill');
       if (fill) fill.style.width = `${data.percent}%`;
     }
