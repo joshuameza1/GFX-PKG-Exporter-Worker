@@ -19,12 +19,18 @@ class NexrenderRunner {
     this.log(
       `Init nexrender — binary=${this.config.aerenderPath} workpath=${this.config.nexrenderWorkpath}`
     );
+    const self = this;
     this.settings = nexrender.init({
       workpath: this.config.nexrenderWorkpath,
       binary: this.config.aerenderPath,
       skipCleanup: true, // keep work files for crash diagnosis
       stopOnError: true,
       debug: true,
+      verbose: true,
+      logger: {
+        log: (...args) => self.log(args.map(String).join(' ')),
+        error: (...args) => self.log(args.map(String).join(' '), 'error'),
+      },
     });
   }
 
@@ -33,7 +39,10 @@ class NexrenderRunner {
 
     const templateSrc = nexrenderConfig?.template?.src;
     const composition = nexrenderConfig?.template?.composition;
-    this.log(`Starting render — comp=${composition} template=${templateSrc}`);
+    const useOriginal = Boolean(nexrenderConfig?.template?.useOriginal);
+    this.log(
+      `Starting render — comp=${composition} useOriginal=${useOriginal} template=${templateSrc}`
+    );
 
     nexrenderConfig.onChange = (job, state) => {
       this.log(`Render state: ${state}`);

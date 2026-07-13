@@ -50,8 +50,9 @@ class JobProcessor extends EventEmitter {
     const { id, request } = job;
     try {
       this.log(`Processing job ${id} — ${request.type} (${request.gfxpkg})`);
-      const { requestKey, configs, templatePath } = buildNexrenderConfigs(request, this.config);
-      this.log(`Template: ${templatePath} — ${configs.length} render pass(es)`);
+      const { requestKey, configs, templatePath, packageRoot } = buildNexrenderConfigs(request, this.config);
+      this.log(`Template: ${templatePath}`);
+      this.log(`Package root: ${packageRoot} — ${configs.length} render pass(es)`);
 
       for (const nexrenderConfig of configs) {
         await this.runner.renderJob(nexrenderConfig, {

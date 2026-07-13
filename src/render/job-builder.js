@@ -53,6 +53,7 @@ function buildNexrenderConfigs(request, config) {
 
   const templateSrc = pathToFileURL(templatePath).href;
   const assets = extractTemplateFields(request);
+  const packageRoot = path.dirname(templatePath);
 
   const input = request.outputModule.includes('ProRes') ? 'result.mov' : 'result_00000.jpg';
   const outputModule = request.outputModule.includes('ProRes') && request.outputModule !== 'ProRes+Alpha'
@@ -71,6 +72,9 @@ function buildNexrenderConfigs(request, config) {
     const nexrenderConfig = {
       template: {
         src: templateSrc,
+        // Keep Collect Files packages in place so footage/relatives stay valid.
+        // Copying only the .aepx into Work/ was crashing mid-download / breaking AE.
+        useOriginal: true,
         composition: `^${request.type.split(' ').join('_')}`,
         outputModule,
         frameStart: frame.start_frame,
@@ -89,12 +93,13 @@ function buildNexrenderConfigs(request, config) {
         ],
       },
       _jobName: jobName,
+      _packageRoot: packageRoot,
     };
 
     return nexrenderConfig;
   });
 
-  return { requestKey, configs, templatePath, templateSrc };
+  return { requestKey, configs, templatePath, templateSrc, packageRoot };
 }
 
 async function zipRenderFiles(renderFolder, requestKey) {
