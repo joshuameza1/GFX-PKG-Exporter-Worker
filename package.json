@@ -3,10 +3,16 @@
   "version": "1.0.0",
   "description": "GFX PKG Exporter - After Effects render worker with Electron UI",
   "main": "electron/main.js",
+  "author": "Elevation Church",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/joshuameza1/GFX-PKG-Exporter-Worker.git"
+  },
   "scripts": {
     "start": "electron .",
     "dev": "ELECTRON_IS_DEV=1 electron .",
-    "build": "electron-builder --mac"
+    "build": "electron-builder --mac --publish never",
+    "release": "electron-builder --mac --publish always"
   },
   "dependencies": {
     "@nexrender/core": "^1.46.5",
@@ -16,6 +22,7 @@
     "better-sqlite3": "^11.0.0",
     "chokidar": "^3.5.3",
     "dotenv": "^16.4.5",
+    "electron-updater": "^6.3.9",
     "socket.io-client": "^4.7.1"
   },
   "devDependencies": {
@@ -26,8 +33,24 @@
     "appId": "org.elevationchurch.gfx-pkg-exporter",
     "productName": "GFX PKG Exporter",
     "mac": {
-      "target": "dmg",
-      "category": "public.app-category.graphics-design"
+      "target": [
+        {
+          "target": "dmg",
+          "arch": ["universal"]
+        },
+        {
+          "target": "zip",
+          "arch": ["universal"]
+        }
+      ],
+      "category": "public.app-category.graphics-design",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "electron/entitlements.mac.plist",
+      "entitlementsInherit": "electron/entitlements.mac.plist"
+    },
+    "dmg": {
+      "title": "GFX PKG Exporter ${version}"
     },
     "files": [
       "electron/**/*",
@@ -36,11 +59,21 @@
     ],
     "extraResources": [
       {
+        "from": ".env.example",
+        "to": ".env.example"
+      },
+      {
         "from": "ae/",
         "to": "ae/",
         "filter": ["**/*"]
       }
     ],
-    "asar": true
+    "asar": true,
+    "publish": {
+      "provider": "github",
+      "owner": "joshuameza1",
+      "repo": "GFX-PKG-Exporter-Worker",
+      "private": true
+    }
   }
 }

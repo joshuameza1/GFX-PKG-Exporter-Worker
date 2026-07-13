@@ -1,0 +1,3 @@
+// Copy to github-token.js for local release builds, or let CI generate this file.
+// Use a fine-grained GitHub PAT with read access to this repo's contents/releases.
+module.exports = '';

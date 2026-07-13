@@ -181,10 +181,37 @@
             <span class="path-label">Renders</span>
             <span class="path-value" id="setting-render-folder">—</span>
           </div>
-          <div class="path-row last">
+          <div class="path-row">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
             <span class="path-label">CDN</span>
             <span class="path-value" id="setting-cdn-url">—</span>
+          </div>
+          <div class="path-row last">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            <span class="path-label">Config</span>
+            <span class="path-value" id="setting-env-path">—</span>
+          </div>
+        </div>
+
+        <!-- Application -->
+        <div class="section-title" style="margin-bottom: 10px; margin-top: 24px;">Application</div>
+        <div class="app-card">
+          <div class="app-row">
+            <span class="app-label">Version</span>
+            <span class="app-value" id="app-version">—</span>
+          </div>
+          <div class="app-row">
+            <span class="app-label">Updates</span>
+            <span class="app-value" id="update-status-text">Checking...</span>
+          </div>
+          <div class="update-actions">
+            <button class="secondary-btn" id="check-update-btn">Check for updates</button>
+            <button class="primary-btn" id="download-update-btn" style="display:none">Download update</button>
+            <button class="primary-btn" id="install-update-btn" style="display:none">Restart to update</button>
+          </div>
+          <div class="update-progress" id="update-progress" style="display:none">
+            <div class="progress-bg"><div class="progress-fill" id="update-progress-fill"></div></div>
+            <span class="update-progress-label" id="update-progress-label">0%</span>
           </div>
         </div>
       </div>

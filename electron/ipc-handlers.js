@@ -1,8 +1,15 @@
-const { shell, dialog } = require('electron');
+const { shell, dialog, app } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const { execFile } = require('child_process');
+const { getEnvPath } = require('./env-loader');
+const {
+  checkForUpdates,
+  downloadUpdate,
+  installUpdate,
+  isUpdateReady,
+} = require('./updater');
 
 function registerIpcHandlers(ipcMain, services) {
   const { jobStore, socketClient, templateParser, config, processor } = services;
@@ -27,8 +34,16 @@ function registerIpcHandlers(ipcMain, services) {
       renderFolder: config.renderFolder,
       cdnUrl: config.cdnUrl,
       hostname: os.hostname(),
+      appVersion: app.getVersion(),
+      envPath: getEnvPath(),
+      isPackaged: app.isPackaged,
     };
   });
+
+  ipcMain.handle('check-for-updates', () => checkForUpdates({ silent: false }));
+  ipcMain.handle('download-update', () => downloadUpdate());
+  ipcMain.handle('install-update', () => installUpdate());
+  ipcMain.handle('get-update-ready', () => isUpdateReady());
 
   ipcMain.handle('test-render', async (event, data) => {
     const { graphic, fields } = data;

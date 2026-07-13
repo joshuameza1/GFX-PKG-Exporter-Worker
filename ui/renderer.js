@@ -532,6 +532,78 @@ function updateServerStatus(status) {
   }
 }
 
+// ===== App updates =====
+let pendingUpdateVersion = null;
+
+function setUpdateUi(state) {
+  const statusText = document.getElementById('update-status-text');
+  const checkBtn = document.getElementById('check-update-btn');
+  const downloadBtn = document.getElementById('download-update-btn');
+  const installBtn = document.getElementById('install-update-btn');
+  const progressWrap = document.getElementById('update-progress');
+  const progressFill = document.getElementById('update-progress-fill');
+  const progressLabel = document.getElementById('update-progress-label');
+
+  if (!statusText) return;
+
+  checkBtn.disabled = false;
+  downloadBtn.style.display = 'none';
+  installBtn.style.display = 'none';
+  progressWrap.style.display = 'none';
+
+  switch (state.status) {
+    case 'checking':
+      statusText.textContent = 'Checking for updates...';
+      checkBtn.disabled = true;
+      break;
+    case 'available':
+      pendingUpdateVersion = state.version;
+      statusText.textContent = `v${state.version} available`;
+      downloadBtn.style.display = 'inline-block';
+      break;
+    case 'downloading':
+      statusText.textContent = `Downloading v${pendingUpdateVersion || ''}`.trim();
+      progressWrap.style.display = 'flex';
+      progressFill.style.width = `${state.percent || 0}%`;
+      progressLabel.textContent = `${state.percent || 0}%`;
+      checkBtn.disabled = true;
+      break;
+    case 'ready':
+      statusText.textContent = `v${state.version || pendingUpdateVersion} ready to install`;
+      installBtn.style.display = 'inline-block';
+      break;
+    case 'current':
+      statusText.textContent = 'Up to date';
+      break;
+    case 'error':
+      statusText.textContent = state.message || 'Update check failed';
+      break;
+    case 'dev-mode':
+      statusText.textContent = 'Dev mode — updates disabled';
+      break;
+    default:
+      statusText.textContent = 'Ready';
+  }
+}
+
+document.getElementById('check-update-btn')?.addEventListener('click', async () => {
+  setUpdateUi({ status: 'checking' });
+  await window.api.checkForUpdates();
+});
+
+document.getElementById('download-update-btn')?.addEventListener('click', async () => {
+  setUpdateUi({ status: 'downloading', percent: 0 });
+  await window.api.downloadUpdate();
+});
+
+document.getElementById('install-update-btn')?.addEventListener('click', async () => {
+  await window.api.installUpdate();
+});
+
+window.api.onUpdateStatus((state) => {
+  setUpdateUi(state);
+});
+
 // ===== IPC event listeners =====
 window.api.onSocketStatus((status) => {
   updateServerStatus(status);
@@ -616,6 +688,11 @@ async function init() {
     document.getElementById('setting-watch-folder').textContent = config.watchFolder || '—';
     document.getElementById('setting-render-folder').textContent = config.renderFolder || '—';
     document.getElementById('setting-cdn-url').textContent = config.cdnUrl || '—';
+    document.getElementById('setting-env-path').textContent = config.envPath || '—';
+    document.getElementById('app-version').textContent = config.appVersion ? `v${config.appVersion}` : '—';
+    if (!config.isPackaged) {
+      setUpdateUi({ status: 'dev-mode' });
+    }
     document.getElementById('network-url').textContent = config.socketIoUrl || '—';
     if (config.hostname) {
       const workerHostname = document.getElementById('worker-hostname');

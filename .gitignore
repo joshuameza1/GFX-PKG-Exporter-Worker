@@ -6,4 +6,5 @@ nexrender/
 *.db
 dist/
 src/render/requests
+electron/github-token.js
 **.DS_Store**

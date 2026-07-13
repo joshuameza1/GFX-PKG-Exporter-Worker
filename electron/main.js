@@ -1,7 +1,8 @@
 const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('path');
 
-require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
+const { loadEnv } = require('./env-loader');
+loadEnv();
 
 const config = require('../src/config');
 const { JobStore } = require('../src/queue/job-store');
@@ -11,6 +12,7 @@ const { EventRouter } = require('../src/bridge/event-router');
 const { TemplateWatcher } = require('../src/templates/template-watcher');
 const { TemplateParser } = require('../src/templates/template-parser');
 const { registerIpcHandlers } = require('./ipc-handlers');
+const { setupAutoUpdater, checkForUpdates } = require('./updater');
 
 let mainWindow;
 
@@ -59,6 +61,14 @@ app.whenReady().then(() => {
   const watcher = new TemplateWatcher(config.watchFolder);
 
   registerIpcHandlers(ipcMain, { jobStore, socketClient, templateParser, config, processor });
+
+  setupAutoUpdater({ log, sendToRenderer });
+
+  if (app.isPackaged) {
+    setTimeout(() => {
+      checkForUpdates({ silent: true });
+    }, 5000);
+  }
 
   watcher.on('template-changed', async (filePath) => {
     log('Template file changed, re-parsing...');
