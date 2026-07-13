@@ -50,6 +50,13 @@ function isNewerVersion(remote, local) {
 function pickDmgAsset(assets = []) {
   const dmgs = assets.filter((asset) => /\.dmg$/i.test(asset.name || ''));
   if (!dmgs.length) return null;
+
+  // Match this machine's CPU. Prefer arch-specific builds over a "universal"
+  // DMG that may still ship arm64-only native modules.
+  const arch = process.arch; // arm64 | x64
+  const archMatch = dmgs.find((asset) => new RegExp(`(^|[-_.])${arch}([-_.]|$)`, 'i').test(asset.name));
+  if (archMatch) return archMatch;
+
   const universal = dmgs.find((asset) => /universal/i.test(asset.name));
   return universal || dmgs[0];
 }

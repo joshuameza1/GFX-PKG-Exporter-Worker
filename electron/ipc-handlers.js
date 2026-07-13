@@ -27,11 +27,11 @@ function registerIpcHandlers(ipcMain, services) {
   } = services;
 
   ipcMain.handle('get-jobs', () => {
-    return jobStore.getAll();
+    return jobStore ? jobStore.getAll() : [];
   });
 
   ipcMain.handle('get-socket-status', () => {
-    return socketClient.getStatus();
+    return socketClient ? socketClient.getStatus() : 'disconnected';
   });
 
   ipcMain.handle('get-template-info', () => {
@@ -77,6 +77,9 @@ function registerIpcHandlers(ipcMain, services) {
   ipcMain.handle('get-latest-update', () => getLatestUpdate());
 
   ipcMain.handle('test-render', async (event, data) => {
+    if (!jobStore || !processor) {
+      return { success: false, error: 'Render queue unavailable (database failed to open)' };
+    }
     const { graphic, fields } = data;
 
     const request = {
@@ -170,6 +173,7 @@ function registerIpcHandlers(ipcMain, services) {
   });
 
   ipcMain.handle('clear-jobs', () => {
+    if (!jobStore) return [];
     jobStore.clearAll();
     return jobStore.getAll();
   });
@@ -244,7 +248,7 @@ function registerIpcHandlers(ipcMain, services) {
   ipcMain.handle('set-package-live', (_, { filePath, isLive }) => {
     templateParser.setLive(filePath, isLive);
     const liveGraphics = templateParser.getLiveGraphics();
-    socketClient.emit('updateSlackAppUI', liveGraphics);
+    socketClient && socketClient.emit('updateSlackAppUI', liveGraphics);
     return templateParser.getCurrentInfo();
   });
 
@@ -262,55 +266,56 @@ function registerIpcHandlers(ipcMain, services) {
     }
 
     const liveGraphics = templateParser.getLiveGraphics();
-    socketClient.emit('updateSlackAppUI', liveGraphics);
+    socketClient && socketClient.emit('updateSlackAppUI', liveGraphics);
     return templateParser.getCurrentInfo();
   });
 
   ipcMain.handle('set-layout', (_, layout) => {
     templateParser.setLayout(layout);
     const liveGraphics = templateParser.getLiveGraphics();
-    socketClient.emit('updateSlackAppUI', liveGraphics);
+    socketClient && socketClient.emit('updateSlackAppUI', liveGraphics);
     return templateParser.getCurrentInfo();
   });
 
   ipcMain.handle('create-folder', (_, name) => {
     templateParser.createFolder(name);
     const liveGraphics = templateParser.getLiveGraphics();
-    socketClient.emit('updateSlackAppUI', liveGraphics);
+    socketClient && socketClient.emit('updateSlackAppUI', liveGraphics);
     return templateParser.getCurrentInfo();
   });
 
   ipcMain.handle('rename-folder', (_, { oldName, newName }) => {
     templateParser.renameFolder(oldName, newName);
     const liveGraphics = templateParser.getLiveGraphics();
-    socketClient.emit('updateSlackAppUI', liveGraphics);
+    socketClient && socketClient.emit('updateSlackAppUI', liveGraphics);
     return templateParser.getCurrentInfo();
   });
 
   ipcMain.handle('delete-folder', (_, name) => {
     templateParser.deleteFolder(name);
     const liveGraphics = templateParser.getLiveGraphics();
-    socketClient.emit('updateSlackAppUI', liveGraphics);
+    socketClient && socketClient.emit('updateSlackAppUI', liveGraphics);
     return templateParser.getCurrentInfo();
   });
 
   ipcMain.handle('set-package-folder', (_, { filePath, folderName }) => {
     templateParser.setPackageFolder(filePath, folderName || null);
     const liveGraphics = templateParser.getLiveGraphics();
-    socketClient.emit('updateSlackAppUI', liveGraphics);
+    socketClient && socketClient.emit('updateSlackAppUI', liveGraphics);
     return templateParser.getCurrentInfo();
   });
 
   ipcMain.handle('refire-job', (_, jobId) => {
+    if (!jobStore) return [];
     const job = jobStore.getById(jobId);
     if (!job) return null;
 
     if (job.status === 'failed') {
       jobStore.resetJob(jobId);
-      processor.nudge();
+      if (processor) processor.nudge();
     } else if (job.status === 'completed') {
       const request = typeof job.request === 'string' ? JSON.parse(job.request) : job.request;
-      socketClient.emit('finalDone', [request, job.local_path, job.result_link]);
+      socketClient && socketClient.emit('finalDone', [request, job.local_path, job.result_link]);
     }
 
     return jobStore.getAll();

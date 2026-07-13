@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog } = require('electron');
 const path = require('path');
 
 const { loadEnv } = require('./env-loader');
@@ -58,7 +58,7 @@ function restartWatcher() {
     log('Template file changed, re-parsing...');
     await templateParser.updatePackage(filePath);
     const liveGraphics = templateParser.getLiveGraphics();
-    socketClient.emit('updateSlackAppUI', liveGraphics);
+    if (socketClient) socketClient.emit('updateSlackAppUI', liveGraphics);
     log(`Pushed ${liveGraphics.length} compositions to Slack`);
     sendTemplateUpdate();
   });
@@ -66,27 +66,31 @@ function restartWatcher() {
 }
 
 app.whenReady().then(() => {
-  mainWindow = new BrowserWindow({
-    width: 1100,
-    height: 700,
-    minWidth: 800,
-    minHeight: 500,
-    title: 'GFX PKG Exporter',
-    titleBarStyle: 'hiddenInset',
-    trafficLightPosition: { x: 14, y: 14 },
-    webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
-      contextIsolation: true,
-      nodeIntegration: false,
-    },
-  });
-  mainWindow.loadFile(path.join(__dirname, '..', 'ui', 'index.html'));
+  let jobStore = null;
+  let processor = null;
+  let eventRouter = null;
+  let initError = null;
 
-  const jobStore = new JobStore(path.join(app.getPath('userData'), 'jobs.db'));
+  // Register IPC before the window loads so Settings / update never race a failed service init.
+  try {
+    jobStore = new JobStore(path.join(app.getPath('userData'), 'jobs.db'));
+  } catch (err) {
+    initError = err;
+    console.error('[error] JobStore failed to open:', err);
+  }
+
   socketClient = new SocketClient(config.socketIoUrl);
   templateParser = new TemplateParser(config.watchFolder);
-  const processor = new JobProcessor(jobStore, config);
-  const eventRouter = new EventRouter(socketClient, jobStore, processor);
+
+  if (jobStore) {
+    try {
+      processor = new JobProcessor(jobStore, config);
+      eventRouter = new EventRouter(socketClient, jobStore, processor);
+    } catch (err) {
+      initError = initError || err;
+      console.error('[error] Queue/processor init failed:', err);
+    }
+  }
 
   registerIpcHandlers(ipcMain, {
     jobStore,
@@ -166,11 +170,39 @@ app.whenReady().then(() => {
     }, 8000);
   }
 
+  mainWindow = new BrowserWindow({
+    width: 1100,
+    height: 700,
+    minWidth: 800,
+    minHeight: 500,
+    title: 'GFX PKG Exporter',
+    titleBarStyle: 'hiddenInset',
+    trafficLightPosition: { x: 14, y: 14 },
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+  mainWindow.loadFile(path.join(__dirname, '..', 'ui', 'index.html'));
+
+  if (initError) {
+    dialog.showErrorBox(
+      'GFX PKG Exporter — database failed to open',
+      [
+        initError.message || String(initError),
+        '',
+        'Settings and update checks should still work.',
+        'If this Mac is Intel, install the x64 DMG (not arm64).',
+        `This build architecture: ${process.arch}`,
+      ].join('\n')
+    );
+  }
+
   socketClient.on('status', (status) => {
     sendToRenderer('socket:status', status);
     if (status === 'connected') {
       log('Connected to server');
-      // Parse off the event turn so status updates aren't delayed.
       setImmediate(() => {
         templateParser.parseAllTemplates()
           .then((liveGraphics) => {
@@ -189,21 +221,26 @@ app.whenReady().then(() => {
     }
   });
 
-  eventRouter.on('job:queued', (data) => {
-    log(`Job queued: ${data.request.type} from ${data.request.display_name || data.request.user_id}`);
-    sendToRenderer('queue:updated');
-  });
-  eventRouter.on('job:completed', (data) => {
-    log(`Job completed: ${data.id}`);
-    sendToRenderer('queue:updated');
-  });
-  eventRouter.on('job:failed', (data) => {
-    log(`Job failed: ${data.id} — ${data.errorMessage}`, 'error');
-    sendToRenderer('queue:updated');
-  });
-  processor.on('job:progress', (data) => {
-    sendToRenderer('job:progress', data);
-  });
+  if (eventRouter) {
+    eventRouter.on('job:queued', (data) => {
+      log(`Job queued: ${data.request.type} from ${data.request.display_name || data.request.user_id}`);
+      sendToRenderer('queue:updated');
+    });
+    eventRouter.on('job:completed', (data) => {
+      log(`Job completed: ${data.id}`);
+      sendToRenderer('queue:updated');
+    });
+    eventRouter.on('job:failed', (data) => {
+      log(`Job failed: ${data.id} — ${data.errorMessage}`, 'error');
+      sendToRenderer('queue:updated');
+    });
+  }
+
+  if (processor) {
+    processor.on('job:progress', (data) => {
+      sendToRenderer('job:progress', data);
+    });
+  }
 
   if (isValidServerUrl(config.socketIoUrl) && !needsSetup(settings)) {
     socketClient.connect();
@@ -216,8 +253,12 @@ app.whenReady().then(() => {
     restartWatcher();
   }
 
-  processor.start();
+  if (processor) processor.start();
   log('GFX PKG Exporter started');
+}).catch((err) => {
+  console.error('[fatal] App failed to start:', err);
+  dialog.showErrorBox('GFX PKG Exporter failed to start', err.message || String(err));
+  app.quit();
 });
 
 app.on('window-all-closed', () => {
